@@ -1,0 +1,22 @@
+/jjp
+/jjp.exe
+/dist/
+*.tmp
+.DS_Store
+
+# Runtime state / local credentials
+server.json
+server.json.*
+*.lock
+*.bak
+*.schema0.bak
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Editors
+.vscode/
+.idea/
