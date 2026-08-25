@@ -521,3 +521,31 @@ func TestInfoIncludesStateSchema(t *testing.T) {
 		t.Fatalf("state schema %d", info.StateSchema)
 	}
 }
+
+func TestHistorySinceQueryValidation(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.json"), "admin", "join")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer((&Server{Store: st}).Handler())
+	defer ts.Close()
+	get := func(path string) int {
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+		req.Header.Set("Authorization", "Bearer "+st.ReadToken())
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := get("/api/v1/events?since=not-a-time"); code != http.StatusBadRequest {
+		t.Fatalf("invalid events since status %d", code)
+	}
+	if code := get("/api/v1/incidents?since=not-a-time"); code != http.StatusBadRequest {
+		t.Fatalf("invalid incidents since status %d", code)
+	}
+	if code := get("/api/v1/events?since=2026-08-25T00:00:00Z"); code != http.StatusOK {
+		t.Fatalf("valid events since status %d", code)
+	}
+}

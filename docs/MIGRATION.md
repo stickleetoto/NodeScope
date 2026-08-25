@@ -33,3 +33,14 @@ For a pre-v0.7 binary that does not have `state backup`, stop the old central se
 ## Downgrade
 
 Do not point an older binary at a schema-1 state file. Keep the pre-migration backup if rollback might be required.
+
+## v1.0.0 -> v1.1.0
+
+No state migration is required. JJP v1.1.0 keeps HTTP API `v1` and state schema `1`.
+
+Recommended rollout:
+
+1. Back up central state with `jjp state backup`.
+2. Replace the central binary with v1.1.0 and restart it.
+3. Run `jjp doctor` and `jjp health`.
+4. Upgrade agents when convenient; v1.0.0 agents remain compatible with the v1.1.0 central server.

@@ -86,6 +86,10 @@ func (c *Client) Alerts(ctx context.Context, ref string) ([]protocol.Alert, erro
 }
 
 func (c *Client) Events(ctx context.Context, limit int, ref string) ([]protocol.Event, error) {
+	return c.EventsSince(ctx, limit, ref, time.Time{})
+}
+
+func (c *Client) EventsSince(ctx context.Context, limit int, ref string, since time.Time) ([]protocol.Event, error) {
 	var out []protocol.Event
 	if limit <= 0 {
 		limit = 50
@@ -95,11 +99,18 @@ func (c *Client) Events(ctx context.Context, limit int, ref string) ([]protocol.
 	if strings.TrimSpace(ref) != "" {
 		q.Set("node", ref)
 	}
+	if !since.IsZero() {
+		q.Set("since", since.UTC().Format(time.RFC3339))
+	}
 	err := c.request(ctx, http.MethodGet, "/api/v1/events?"+q.Encode(), nil, http.StatusOK, &out)
 	return out, err
 }
 
 func (c *Client) Incidents(ctx context.Context, limit int, ref, status string) ([]protocol.Incident, error) {
+	return c.IncidentsSince(ctx, limit, ref, status, time.Time{})
+}
+
+func (c *Client) IncidentsSince(ctx context.Context, limit int, ref, status string, since time.Time) ([]protocol.Incident, error) {
 	var out []protocol.Incident
 	if limit <= 0 {
 		limit = 50
@@ -111,6 +122,9 @@ func (c *Client) Incidents(ctx context.Context, limit int, ref, status string) (
 	}
 	if strings.TrimSpace(status) != "" {
 		q.Set("status", status)
+	}
+	if !since.IsZero() {
+		q.Set("since", since.UTC().Format(time.RFC3339))
 	}
 	err := c.request(ctx, http.MethodGet, "/api/v1/incidents?"+q.Encode(), nil, http.StatusOK, &out)
 	return out, err

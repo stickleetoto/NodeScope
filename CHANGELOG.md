@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.0 - 2026-08-25
+
+### Added
+- Added `jjp health` as a compact fleet health probe with script-friendly exit codes and JSON output.
+- Added `--since` to `jjp events` and `jjp incidents` for duration/RFC3339 lookback filtering.
+- Added RFC3339 `since` filtering to `/api/v1/events` and `/api/v1/incidents`.
+- Added MCP `since_minutes` filtering to `get_recent_events` and `get_incidents`.
+- Added project-specific GitMake release guidance for the v1.1.0 update/release flow.
+
+### Compatibility
+- HTTP API remains v1.
+- State schema remains 1; no migration is required from v1.0.0.
+- V1 remains observation-only; server control is intentionally deferred to V2.
+
 ## v1.0.0
 
 - Frozen the V1 product scope as **Observe**: CLI + API + MCP, with no web UI and no remote server-control plane.

@@ -226,3 +226,19 @@ func TestIncidentToolsPreferCorrelatedHistory(t *testing.T) {
 		}
 	}
 }
+
+func TestHistoryToolsExposeLookbackWindow(t *testing.T) {
+	st, _ := store.Open(filepath.Join(t.TempDir(), "state.json"), "admin", "join")
+	ts := httptest.NewServer((&jjpserver.Server{Store: st}).Handler())
+	defer ts.Close()
+	api, _ := apiclient.New(ts.URL, st.ReadToken())
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`
+	var out bytes.Buffer
+	if err := (&Server{API: api}).Run(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	if !strings.Contains(text, `"since_minutes"`) {
+		t.Fatalf("history tools missing since_minutes: %s", text)
+	}
+}

@@ -301,6 +301,18 @@ func (s *Server) alerts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.Store.Alerts(strings.TrimSpace(r.URL.Query().Get("node"))))
 }
 
+func parseSince(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	v, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("since must be an RFC3339 timestamp")
+	}
+	return v.UTC(), nil
+}
+
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	if !s.readOK(r) {
 		writeAPIError(w, 401, "unauthorized", "read or admin token required")
@@ -315,7 +327,12 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = v
 	}
-	writeJSON(w, http.StatusOK, s.Store.Events(limit, strings.TrimSpace(r.URL.Query().Get("node"))))
+	since, err := parseSince(r.URL.Query().Get("since"))
+	if err != nil {
+		writeAPIError(w, 400, "invalid_since", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s.Store.EventsSince(limit, strings.TrimSpace(r.URL.Query().Get("node")), since))
 }
 
 func (s *Server) incidents(w http.ResponseWriter, r *http.Request) {
@@ -337,7 +354,12 @@ func (s *Server) incidents(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, 400, "invalid_incident_status", "status must be open or resolved")
 		return
 	}
-	writeJSON(w, http.StatusOK, s.Store.Incidents(limit, strings.TrimSpace(r.URL.Query().Get("node")), status))
+	since, err := parseSince(r.URL.Query().Get("since"))
+	if err != nil {
+		writeAPIError(w, 400, "invalid_since", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s.Store.IncidentsSince(limit, strings.TrimSpace(r.URL.Query().Get("node")), status, since))
 }
 
 func (s *Server) incident(w http.ResponseWriter, r *http.Request) {

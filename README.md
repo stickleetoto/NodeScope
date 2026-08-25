@@ -10,7 +10,12 @@ It intentionally has **no web dashboard**. A central server receives authenticat
 
 JJP v1 is the **Observe** generation: it gives operators and AI reliable visibility across servers. It does not execute remote shell commands or autonomously manage nodes.
 
-## v1.0 highlights
+## v1.1 highlights
+
+- `jjp health` gives a one-line fleet health probe and exit code `2` when attention is required
+- `jjp events --since 24h` and `jjp incidents --since 24h` bound historical queries by time
+- MCP history tools accept `since_minutes` so AI clients can answer time-window questions without reading unrelated history
+- Release/package metadata is prepared for GitMake-managed repository updates and GitHub Releases
 
 - Single Go binary, zero external Go dependencies
 - Linux amd64, Linux arm64 (Raspberry Pi), Windows amd64 builds
@@ -108,6 +113,7 @@ export JJP_SERVER=https://SERVER:7443
 export JJP_API_TOKEN=READ_TOKEN
 
 jjp overview
+jjp health
 jjp ls
 jjp alerts
 jjp incidents
@@ -121,6 +127,7 @@ Machine-readable output:
 
 ```bash
 jjp overview --json
+jjp health --json
 jjp diagnose pi-main --json
 jjp ls --json
 jjp show pi-main --json
@@ -130,6 +137,17 @@ jjp incident INCIDENT_ID --json
 jjp events --json
 jjp doctor --json
 ```
+
+## Fleet health probe
+
+`jjp health` is intended for shell scripts, service checks, and quick operator checks:
+
+```bash
+jjp health
+jjp health --json
+```
+
+It prints only the fleet-level status/headline. Exit code `0` means healthy. Exit code `2` means the fleet is degraded or critical and attention is required. Connection/configuration errors continue to use exit code `1`.
 
 ## Services
 
@@ -187,6 +205,8 @@ Incident correlation is **evidence-only**. Temporal proximity is not presented a
 ```bash
 jjp incidents --status open
 jjp incidents --status resolved --node pi-main
+jjp incidents --since 24h
+jjp events --since 2h --limit 100
 jjp incident INCIDENT_ID
 ```
 
@@ -224,6 +244,8 @@ one-node question       -> diagnose_node / get_node
 historical question     -> get_incidents -> get_incident
 raw detail only if needed -> get_recent_events
 ```
+
+For time-bounded historical questions, `get_incidents` and `get_recent_events` accept `since_minutes` (for example `1440` for the last 24 hours).
 
 Administrative registry tools can be exposed explicitly:
 
@@ -370,10 +392,6 @@ GitHub Actions runs tests, race detection, vet, all three cross-builds and check
 - [Operations guide](docs/OPERATIONS.md)
 - [Migration guide](docs/MIGRATION.md)
 - [Security notes](SECURITY.md)
-
-## License
-
-JJP v1.0.0 is licensed under the **Apache License 2.0**. You may use, modify, redistribute, and use JJP commercially under the terms of that license. See [LICENSE](LICENSE).
 
 ## Scope boundary
 

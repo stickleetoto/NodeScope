@@ -784,6 +784,10 @@ func (s *Store) Alerts(ref string) []protocol.Alert {
 }
 
 func (s *Store) Events(limit int, ref string) []protocol.Event {
+	return s.EventsSince(limit, ref, time.Time{})
+}
+
+func (s *Store) EventsSince(limit int, ref string, since time.Time) []protocol.Event {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if limit <= 0 {
@@ -792,6 +796,7 @@ func (s *Store) Events(limit int, ref string) []protocol.Event {
 	if limit > 500 {
 		limit = 500
 	}
+	since = since.UTC()
 	id := ""
 	if strings.TrimSpace(ref) != "" {
 		rid, n := s.resolveLocked(ref)
@@ -803,6 +808,9 @@ func (s *Store) Events(limit int, ref string) []protocol.Event {
 	out := make([]protocol.Event, 0, limit)
 	for i := len(s.data.Events) - 1; i >= 0 && len(out) < limit; i-- {
 		e := s.data.Events[i]
+		if !since.IsZero() && e.OccurredAt.Before(since) {
+			break
+		}
 		if id == "" || e.NodeID == id {
 			out = append(out, e)
 		}
@@ -811,6 +819,10 @@ func (s *Store) Events(limit int, ref string) []protocol.Event {
 }
 
 func (s *Store) Incidents(limit int, ref, status string) []protocol.Incident {
+	return s.IncidentsSince(limit, ref, status, time.Time{})
+}
+
+func (s *Store) IncidentsSince(limit int, ref, status string, since time.Time) []protocol.Incident {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if limit <= 0 {
@@ -821,9 +833,13 @@ func (s *Store) Incidents(limit int, ref, status string) []protocol.Incident {
 	}
 	status = strings.ToLower(strings.TrimSpace(status))
 	ref = strings.TrimSpace(ref)
+	since = since.UTC()
 	out := make([]protocol.Incident, 0, limit)
 	for i := len(s.data.Incidents) - 1; i >= 0 && len(out) < limit; i-- {
 		inc := s.data.Incidents[i]
+		if !since.IsZero() && inc.LastEventAt.Before(since) {
+			continue
+		}
 		if ref != "" && !strings.EqualFold(inc.NodeID, ref) && !strings.EqualFold(inc.NodeName, ref) {
 			continue
 		}

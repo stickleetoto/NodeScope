@@ -1,41 +1,32 @@
-# jjp v1.0.0 — Observe
+# JJP v1.1.0 — Operational UX
 
-This is the first production-oriented V1 release of jjp.
+JJP v1.1.0 is a backwards-compatible V1 maintenance release focused on operator and AI query ergonomics. It does not add V2 remote-control capabilities.
 
-## Scope
+## Highlights
 
-V1 is the observability generation: agent telemetry, service health, alerts/events/incidents, CLI, HTTP API v1 and MCP. It intentionally does not include AI-controlled remote server operations.
+- Added `jjp health` for a compact fleet health probe.
+  - exit `0`: healthy
+  - exit `2`: degraded or critical / operator attention required
+  - exit `1`: connection, authentication, configuration, or other command error
+  - supports `--json`
+- Added bounded history queries:
+  - `jjp events --since 2h`
+  - `jjp incidents --since 24h`
+  - RFC3339 timestamps are also accepted by the CLI
+- HTTP API v1 history endpoints now accept an optional RFC3339 `since` parameter.
+- MCP `get_incidents` and `get_recent_events` now accept `since_minutes` so AI clients can answer time-window questions with less irrelevant context.
+- Added dedicated GitMake release intent metadata for a managed repository update plus GitHub Release.
 
-## Stabilization completed
+## Compatibility
 
-- Versioned central state schema with v0.6 legacy migration and pre-migration backup
-- Persisted alert policy and stable join-token lifecycle
-- Atomic durable state/config replacement
-- Cross-process central state locking
-- State validation, backup and guarded restore
-- Join/read/admin token rotation
-- Optional native TLS
-- Request, payload and heartbeat validation limits
-- Node deletion incident cleanup
-- Corrupt/future state protection and legacy orphan repair
-- Windows metric collection timeout
-- Hardened server timeouts and shutdown flush ordering
-- Release checksums and hardened CI/build scripts
+- HTTP API remains `v1`.
+- State schema remains `1`; no state migration is required from JJP v1.0.0.
+- Existing v1.0.0 agents and central state remain compatible.
+- No server-control or arbitrary remote execution features are included; those remain outside the V1 scope.
 
-## Verification
+## Release assets
 
-Completed on the release source:
-
-- `go test ./... -count=1` — PASS
-- `go test -race ./... -count=1` — PASS
-- `go vet ./...` — PASS
-- Linux amd64 build — PASS
-- Linux arm64 build — PASS
-- Windows amd64 cross-build — PASS
-- Accelerated 24-node virtual soak with outages/service failure/resource pressure/restarts — PASS
-- Real-process state-lock / token-rotation / backup / restore / policy-persistence E2E — PASS
-- Real-process join / heartbeat / incident / recovery / doctor / MCP E2E — PASS
-- Central restart with existing node credential reuse — PASS
-- Native TLS startup and `/healthz` smoke — PASS
-
-See `SECURITY.md` and `docs/OPERATIONS.md` before production deployment.
+- `jjp-windows-amd64.exe`
+- `jjp-linux-amd64`
+- `jjp-linux-arm64`
+- `SHA256SUMS.txt`

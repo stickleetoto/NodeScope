@@ -29,8 +29,22 @@ import (
 	"github.com/jjp-monitor/jjp/internal/store"
 )
 
+type exitCodeError struct {
+	code int
+}
+
+func (e exitCodeError) Error() string { return "" }
+func (e exitCodeError) ExitCode() int { return e.code }
+
 func main() {
 	if err := run(); err != nil {
+		var ee interface{ ExitCode() int }
+		if errors.As(err, &ee) {
+			if strings.TrimSpace(err.Error()) != "" {
+				fmt.Fprintln(os.Stderr, "error:", err)
+			}
+			os.Exit(ee.ExitCode())
+		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
@@ -60,6 +74,8 @@ func run() error {
 		return cmdState(os.Args[2:])
 	case "overview":
 		return cmdOverview(os.Args[2:])
+	case "health":
+		return cmdHealth(os.Args[2:])
 	case "diagnose":
 		return cmdDiagnose(os.Args[2:])
 	case "doctor":
@@ -115,12 +131,13 @@ Usage:
   jjp service rm <name>
 
   jjp overview [--events 10] [--json] [--server URL] [--token TOKEN]
+  jjp health [--json] [--server URL] [--token TOKEN]
   jjp diagnose <node> [--json] [--server URL] [--token TOKEN]
   jjp doctor [--json] [--server URL] [--token TOKEN]
   jjp ls [--json] [--server URL] [--token TOKEN]
   jjp alerts [--node NODE] [--json] [--server URL] [--token TOKEN]
-  jjp events [--node NODE] [--limit 50] [--json] [--server URL] [--token TOKEN]
-  jjp incidents [--node NODE] [--status open|resolved] [--limit 50] [--json]
+  jjp events [--node NODE] [--since 24h] [--limit 50] [--json] [--server URL] [--token TOKEN]
+  jjp incidents [--node NODE] [--status open|resolved] [--since 24h] [--limit 50] [--json]
   jjp incident <id> [--json] [--server URL] [--token TOKEN]
   jjp show <node> [--json] [--server URL] [--token TOKEN]
   jjp rename <node> <new-name> [--server URL] [--admin-token TOKEN]
@@ -857,6 +874,56 @@ func printJSON(v any) error {
 	return enc.Encode(v)
 }
 
+func parseSinceFlag(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	if d, err := time.ParseDuration(raw); err == nil {
+		if d <= 0 {
+			return time.Time{}, fmt.Errorf("since duration must be greater than zero")
+		}
+		return time.Now().UTC().Add(-d), nil
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t.UTC(), nil
+	}
+	return time.Time{}, fmt.Errorf("since must be a duration such as 24h or an RFC3339 timestamp")
+}
+
+func cmdHealth(args []string) error {
+	fs := flag.NewFlagSet("health", flag.ContinueOnError)
+	srv := fs.String("server", envOr("JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
+	tok := fs.String("token", envOr("JJP_API_TOKEN", os.Getenv("JJP_ADMIN_TOKEN")), "read or admin API token")
+	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
+	args = reorderKnownFlags(args, map[string]bool{"--server": true, "--token": true, "--json": false})
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	*tok = resolveReadToken(*tok)
+	api, err := apiclient.New(*srv, *tok)
+	if err != nil {
+		return err
+	}
+	o, err := api.Overview(context.Background(), 0)
+	if err != nil {
+		return err
+	}
+	if *jsonOut {
+		if err := printJSON(map[string]any{
+			"status": o.Status, "attention_required": o.AttentionRequired, "headline": o.Headline, "generated_at": o.GeneratedAt,
+		}); err != nil {
+			return err
+		}
+	} else {
+		fmt.Printf("%s — %s\n", strings.ToUpper(o.Status), o.Headline)
+	}
+	if o.AttentionRequired {
+		return exitCodeError{code: 2}
+	}
+	return nil
+}
+
 func cmdOverview(args []string) error {
 	fs := flag.NewFlagSet("overview", flag.ContinueOnError)
 	srv := fs.String("server", envOr("JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
@@ -1120,9 +1187,10 @@ func cmdEvents(args []string) error {
 	srv := fs.String("server", envOr("JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
 	tok := fs.String("token", envOr("JJP_API_TOKEN", os.Getenv("JJP_ADMIN_TOKEN")), "read or admin API token")
 	node := fs.String("node", "", "filter by node name or ID")
+	sinceRaw := fs.String("since", "", "only include events at or after this duration ago (e.g. 24h) or RFC3339 timestamp")
 	limit := fs.Int("limit", 50, "number of newest events (1-500)")
 	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
-	args = reorderKnownFlags(args, map[string]bool{"--server": true, "--token": true, "--node": true, "--limit": true, "--json": false})
+	args = reorderKnownFlags(args, map[string]bool{"--server": true, "--token": true, "--node": true, "--since": true, "--limit": true, "--json": false})
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -1135,10 +1203,17 @@ func cmdEvents(args []string) error {
 			*tok = localAdminToken()
 		}
 	}
+	since, err := parseSinceFlag(*sinceRaw)
+	if err != nil {
+		return err
+	}
 	q := url.Values{}
 	q.Set("limit", fmt.Sprintf("%d", *limit))
 	if strings.TrimSpace(*node) != "" {
 		q.Set("node", *node)
+	}
+	if !since.IsZero() {
+		q.Set("since", since.Format(time.RFC3339))
 	}
 	endpoint := strings.TrimRight(*srv, "/") + "/api/v1/events?" + q.Encode()
 	var events []protocol.Event
@@ -1166,9 +1241,10 @@ func cmdIncidents(args []string) error {
 	tok := fs.String("token", envOr("JJP_API_TOKEN", os.Getenv("JJP_ADMIN_TOKEN")), "read or admin API token")
 	node := fs.String("node", "", "filter by node name or ID")
 	status := fs.String("status", "", "filter by incident status: open or resolved")
+	sinceRaw := fs.String("since", "", "only include incidents active at or after this duration ago (e.g. 24h) or RFC3339 timestamp")
 	limit := fs.Int("limit", 50, "number of newest incidents (1-500)")
 	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
-	args = reorderKnownFlags(args, map[string]bool{"--server": true, "--token": true, "--node": true, "--status": true, "--limit": true, "--json": false})
+	args = reorderKnownFlags(args, map[string]bool{"--server": true, "--token": true, "--node": true, "--status": true, "--since": true, "--limit": true, "--json": false})
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -1184,7 +1260,11 @@ func cmdIncidents(args []string) error {
 	if err != nil {
 		return err
 	}
-	incs, err := api.Incidents(context.Background(), *limit, *node, *status)
+	since, err := parseSinceFlag(*sinceRaw)
+	if err != nil {
+		return err
+	}
+	incs, err := api.IncidentsSince(context.Background(), *limit, *node, *status, since)
 	if err != nil {
 		return err
 	}

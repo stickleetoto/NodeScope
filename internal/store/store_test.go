@@ -601,3 +601,35 @@ func TestOpenRepairsGhostIncidentFromLegacyDelete(t *testing.T) {
 		t.Fatalf("ghost incident not repaired: %+v ok=%v", d, ok)
 	}
 }
+
+func TestEventsAndIncidentsSince(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	s, err := Open(path, "admin", "join")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)
+	if err := s.AddNode(&protocol.Node{ID: "n1", Name: "pi", Secret: "s", RegisteredAt: t0}); err != nil {
+		t.Fatal(err)
+	}
+	bad := []protocol.ServiceStatus{{Name: "bio", Healthy: false, Message: "down"}}
+	good := []protocol.ServiceStatus{{Name: "bio", Healthy: true}}
+	if err := s.Heartbeat("n1", protocol.Metrics{}, bad, t0.Add(10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Heartbeat("n1", protocol.Metrics{}, good, t0.Add(11*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.EventsSince(10, "pi", t0.Add(10*time.Minute+30*time.Second)); len(got) != 1 || got[0].Kind != "service_recovered" {
+		t.Fatalf("unexpected filtered events: %+v", got)
+	}
+	if got := s.EventsSince(10, "pi", t0.Add(12*time.Minute)); len(got) != 0 {
+		t.Fatalf("expected no events after cutoff, got %+v", got)
+	}
+	if got := s.IncidentsSince(10, "pi", "resolved", t0.Add(10*time.Minute+30*time.Second)); len(got) != 1 {
+		t.Fatalf("expected incident that remained active past cutoff, got %+v", got)
+	}
+	if got := s.IncidentsSince(10, "pi", "resolved", t0.Add(12*time.Minute)); len(got) != 0 {
+		t.Fatalf("expected no incidents after cutoff, got %+v", got)
+	}
+}

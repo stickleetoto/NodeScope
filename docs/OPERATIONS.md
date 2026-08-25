@@ -108,3 +108,30 @@ If the server refuses to start because state is malformed or from a newer schema
 5. Start the central server and run `jjp doctor` plus `jjp overview`.
 
 A v0.6-or-earlier state is migrated automatically on first open and the original bytes are preserved as `server.json.schema0.bak`.
+
+## v1.1 fleet health probe
+
+For a compact operational check:
+
+```bash
+jjp health
+```
+
+Exit codes:
+
+- `0`: healthy
+- `2`: degraded/critical (attention required)
+- `1`: command/connectivity/authentication error
+
+For machine-readable automation:
+
+```bash
+jjp health --json
+```
+
+Bound historical troubleshooting to a useful window instead of retrieving unrelated history:
+
+```bash
+jjp incidents --since 24h
+jjp events --since 2h --limit 100
+```

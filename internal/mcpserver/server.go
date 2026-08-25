@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/jjp-monitor/jjp/internal/apiclient"
 	"github.com/jjp-monitor/jjp/internal/protocol"
@@ -189,16 +190,18 @@ func (s *Server) tools() []toolDef {
 	eventArg := map[string]any{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]any{
-			"node":  map[string]any{"type": "string", "description": "Optional node name or node ID"},
-			"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 500, "description": "Maximum number of newest events to return (default 50)"},
+			"node":          map[string]any{"type": "string", "description": "Optional node name or node ID"},
+			"limit":         map[string]any{"type": "integer", "minimum": 1, "maximum": 500, "description": "Maximum number of newest events to return (default 50)"},
+			"since_minutes": map[string]any{"type": "integer", "minimum": 1, "maximum": 525600, "description": "Optional lookback window in minutes (for example 1440 for the last 24 hours)"},
 		},
 	}
 	incidentArg := map[string]any{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]any{
-			"node":   map[string]any{"type": "string", "description": "Optional node name or node ID"},
-			"status": map[string]any{"type": "string", "enum": []string{"open", "resolved"}, "description": "Optional incident status filter"},
-			"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 500, "description": "Maximum number of newest incidents to return (default 50)"},
+			"node":          map[string]any{"type": "string", "description": "Optional node name or node ID"},
+			"status":        map[string]any{"type": "string", "enum": []string{"open", "resolved"}, "description": "Optional incident status filter"},
+			"limit":         map[string]any{"type": "integer", "minimum": 1, "maximum": 500, "description": "Maximum number of newest incidents to return (default 50)"},
+			"since_minutes": map[string]any{"type": "integer", "minimum": 1, "maximum": 525600, "description": "Optional lookback window in minutes (for example 1440 for the last 24 hours)"},
 		},
 	}
 	incidentIDArg := map[string]any{
@@ -219,9 +222,9 @@ func (s *Server) tools() []toolDef {
 		{Name: "get_summary", Description: "Get aggregate jjp node, service, and active-alert counts.", InputSchema: empty, OutputSchema: summarySchema(), Annotations: readAnn("JJP Summary")},
 		{Name: "get_unhealthy_nodes", Description: "List nodes that are offline/unstable or have active health problems.", InputSchema: empty, OutputSchema: arraySchema(nodeSchema()), Annotations: readAnn("Unhealthy JJP Nodes")},
 		{Name: "get_active_alerts", Description: "Get current unresolved jjp alerts, optionally filtered to one node.", InputSchema: filterArg, OutputSchema: arraySchema(alertSchema()), Annotations: readAnn("Active JJP Alerts")},
-		{Name: "get_incidents", Description: "Preferred historical health tool. Get correlated node incidents instead of raw event logs, optionally filtered by node and open/resolved status.", InputSchema: incidentArg, OutputSchema: arraySchema(incidentSchema()), Annotations: readAnn("JJP Incidents")},
+		{Name: "get_incidents", Description: "Preferred historical health tool. Get correlated node incidents instead of raw event logs, optionally filtered by node, open/resolved status, and a lookback window.", InputSchema: incidentArg, OutputSchema: arraySchema(incidentSchema()), Annotations: readAnn("JJP Incidents")},
 		{Name: "get_incident", Description: "Get one incident with its ordered raw event timeline for evidence and chronology.", InputSchema: incidentIDArg, OutputSchema: incidentDetailSchema(), Annotations: readAnn("JJP Incident Timeline")},
-		{Name: "get_recent_events", Description: "Get raw recent jjp health/recovery events. Prefer get_incidents for historical questions and use this only when event-level detail is needed.", InputSchema: eventArg, OutputSchema: arraySchema(eventSchema()), Annotations: readAnn("Recent JJP Events")},
+		{Name: "get_recent_events", Description: "Get raw recent jjp health/recovery events, optionally limited to a lookback window. Prefer get_incidents for historical questions and use this only when event-level detail is needed.", InputSchema: eventArg, OutputSchema: arraySchema(eventSchema()), Annotations: readAnn("Recent JJP Events")},
 		{Name: "get_node", Description: "Get detailed status for one jjp node by name or ID.", InputSchema: nodeArg, OutputSchema: nodeSchema(), Annotations: readAnn("JJP Node Details")},
 		{Name: "list_services", Description: "Get monitored service states for one jjp node.", InputSchema: nodeArg, OutputSchema: arraySchema(serviceSchema()), Annotations: readAnn("JJP Node Services")},
 		{Name: "list_nodes", Description: "List every registered jjp node with full metrics and service health. Prefer get_overview for broad health questions because this can return much more context.", InputSchema: empty, OutputSchema: arraySchema(nodeSchema()), Annotations: readAnn("All JJP Nodes")},
@@ -278,7 +281,15 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) (an
 		if status != "" && status != "open" && status != "resolved" {
 			return nil, fmt.Errorf("argument %q must be open or resolved", "status")
 		}
-		return s.API.Incidents(ctx, limit, optionalString(raw, "node"), status)
+		sinceMinutes, err := optionalInt(raw, "since_minutes", 0, 0, 525600)
+		if err != nil {
+			return nil, err
+		}
+		since := time.Time{}
+		if sinceMinutes > 0 {
+			since = time.Now().UTC().Add(-time.Duration(sinceMinutes) * time.Minute)
+		}
+		return s.API.IncidentsSince(ctx, limit, optionalString(raw, "node"), status, since)
 	case "get_incident":
 		id, err := argString(raw, "incident_id")
 		if err != nil {
@@ -290,7 +301,15 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) (an
 		if err != nil {
 			return nil, err
 		}
-		return s.API.Events(ctx, limit, optionalString(raw, "node"))
+		sinceMinutes, err := optionalInt(raw, "since_minutes", 0, 0, 525600)
+		if err != nil {
+			return nil, err
+		}
+		since := time.Time{}
+		if sinceMinutes > 0 {
+			since = time.Now().UTC().Add(-time.Duration(sinceMinutes) * time.Minute)
+		}
+		return s.API.EventsSince(ctx, limit, optionalString(raw, "node"), since)
 	case "get_node":
 		node, err := argString(raw, "node")
 		if err != nil {
