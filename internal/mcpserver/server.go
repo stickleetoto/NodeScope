@@ -116,7 +116,7 @@ func (s *Server) handle(ctx context.Context, req rpcRequest) (rpcResponse, bool)
 		return okResponse(req.ID, map[string]any{
 			"protocolVersion": version,
 			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
-			"serverInfo":      map[string]any{"name": "jjp", "version": protocol.Version},
+			"serverInfo":      map[string]any{"name": "nodescope", "version": protocol.Version},
 			"instructions":    s.instructions(),
 		}), true
 	case "ping":
@@ -217,34 +217,34 @@ func (s *Server) tools() []toolDef {
 		return map[string]any{"title": title, "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
 	}
 	out := []toolDef{
-		{Name: "get_overview", Description: "Preferred first tool. Get a compact AI-oriented snapshot with overall health, attention flag, counts, unhealthy-node digests, active alerts, and recent events.", InputSchema: overviewArg, OutputSchema: overviewSchema(), Annotations: readAnn("JJP Overview")},
-		{Name: "diagnose_node", Description: "Explain one node using deterministic findings, evidence, severity, and suggested operator checks. Does not guess undocumented root causes.", InputSchema: nodeArg, OutputSchema: diagnosisSchema(), Annotations: readAnn("Diagnose JJP Node")},
-		{Name: "get_summary", Description: "Get aggregate jjp node, service, and active-alert counts.", InputSchema: empty, OutputSchema: summarySchema(), Annotations: readAnn("JJP Summary")},
-		{Name: "get_unhealthy_nodes", Description: "List nodes that are offline/unstable or have active health problems.", InputSchema: empty, OutputSchema: arraySchema(nodeSchema()), Annotations: readAnn("Unhealthy JJP Nodes")},
-		{Name: "get_active_alerts", Description: "Get current unresolved jjp alerts, optionally filtered to one node.", InputSchema: filterArg, OutputSchema: arraySchema(alertSchema()), Annotations: readAnn("Active JJP Alerts")},
-		{Name: "get_incidents", Description: "Preferred historical health tool. Get correlated node incidents instead of raw event logs, optionally filtered by node, open/resolved status, and a lookback window.", InputSchema: incidentArg, OutputSchema: arraySchema(incidentSchema()), Annotations: readAnn("JJP Incidents")},
-		{Name: "get_incident", Description: "Get one incident with its ordered raw event timeline for evidence and chronology.", InputSchema: incidentIDArg, OutputSchema: incidentDetailSchema(), Annotations: readAnn("JJP Incident Timeline")},
-		{Name: "get_recent_events", Description: "Get raw recent jjp health/recovery events, optionally limited to a lookback window. Prefer get_incidents for historical questions and use this only when event-level detail is needed.", InputSchema: eventArg, OutputSchema: arraySchema(eventSchema()), Annotations: readAnn("Recent JJP Events")},
-		{Name: "get_node", Description: "Get detailed status for one jjp node by name or ID.", InputSchema: nodeArg, OutputSchema: nodeSchema(), Annotations: readAnn("JJP Node Details")},
-		{Name: "list_services", Description: "Get monitored service states for one jjp node.", InputSchema: nodeArg, OutputSchema: arraySchema(serviceSchema()), Annotations: readAnn("JJP Node Services")},
-		{Name: "list_nodes", Description: "List every registered jjp node with full metrics and service health. Prefer get_overview for broad health questions because this can return much more context.", InputSchema: empty, OutputSchema: arraySchema(nodeSchema()), Annotations: readAnn("All JJP Nodes")},
+		{Name: "get_overview", Description: "Preferred first tool. Get a compact AI-oriented snapshot with overall health, attention flag, counts, unhealthy-node digests, active alerts, and recent events.", InputSchema: overviewArg, OutputSchema: overviewSchema(), Annotations: readAnn("NodeScope Overview")},
+		{Name: "diagnose_node", Description: "Explain one node using deterministic findings, evidence, severity, and suggested operator checks. Does not guess undocumented root causes.", InputSchema: nodeArg, OutputSchema: diagnosisSchema(), Annotations: readAnn("Diagnose NodeScope Node")},
+		{Name: "get_summary", Description: "Get aggregate NodeScope node, service, and active-alert counts.", InputSchema: empty, OutputSchema: summarySchema(), Annotations: readAnn("NodeScope Summary")},
+		{Name: "get_unhealthy_nodes", Description: "List nodes that are offline/unstable or have active health problems.", InputSchema: empty, OutputSchema: arraySchema(nodeSchema()), Annotations: readAnn("Unhealthy NodeScope Nodes")},
+		{Name: "get_active_alerts", Description: "Get current unresolved NodeScope alerts, optionally filtered to one node.", InputSchema: filterArg, OutputSchema: arraySchema(alertSchema()), Annotations: readAnn("Active NodeScope Alerts")},
+		{Name: "get_incidents", Description: "Preferred historical health tool. Get correlated node incidents instead of raw event logs, optionally filtered by node, open/resolved status, and a lookback window.", InputSchema: incidentArg, OutputSchema: arraySchema(incidentSchema()), Annotations: readAnn("NodeScope Incidents")},
+		{Name: "get_incident", Description: "Get one incident with its ordered raw event timeline for evidence and chronology.", InputSchema: incidentIDArg, OutputSchema: incidentDetailSchema(), Annotations: readAnn("NodeScope Incident Timeline")},
+		{Name: "get_recent_events", Description: "Get raw recent NodeScope health/recovery events, optionally limited to a lookback window. Prefer get_incidents for historical questions and use this only when event-level detail is needed.", InputSchema: eventArg, OutputSchema: arraySchema(eventSchema()), Annotations: readAnn("Recent NodeScope Events")},
+		{Name: "get_node", Description: "Get detailed status for one NodeScope node by name or ID.", InputSchema: nodeArg, OutputSchema: nodeSchema(), Annotations: readAnn("NodeScope Node Details")},
+		{Name: "list_services", Description: "Get monitored service states for one NodeScope node.", InputSchema: nodeArg, OutputSchema: arraySchema(serviceSchema()), Annotations: readAnn("NodeScope Node Services")},
+		{Name: "list_nodes", Description: "List every registered NodeScope node with full metrics and service health. Prefer get_overview for broad health questions because this can return much more context.", InputSchema: empty, OutputSchema: arraySchema(nodeSchema()), Annotations: readAnn("All NodeScope Nodes")},
 	}
 	if s.AllowWrite {
 		out = append(out,
-			toolDef{Name: "rename_node", Description: "Rename a registered jjp node. Use only after an explicit user request.", InputSchema: map[string]any{
+			toolDef{Name: "rename_node", Description: "Rename a registered NodeScope node. Use only after an explicit user request.", InputSchema: map[string]any{
 				"type": "object", "additionalProperties": false,
 				"properties": map[string]any{
 					"node":     map[string]any{"type": "string", "description": "Current node name or ID"},
 					"new_name": map[string]any{"type": "string", "description": "New node name"},
 				}, "required": []string{"node", "new_name"},
-			}, OutputSchema: mutationSchema("renamed", "new_name"), Annotations: map[string]any{"title": "Rename JJP Node", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}},
-			toolDef{Name: "remove_node", Description: "Permanently remove a registered jjp node from central state and invalidate its agent credential. Requires confirm=true and an explicit user request.", InputSchema: map[string]any{
+			}, OutputSchema: mutationSchema("renamed", "new_name"), Annotations: map[string]any{"title": "Rename NodeScope Node", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}},
+			toolDef{Name: "remove_node", Description: "Permanently remove a registered NodeScope node from central state and invalidate its agent credential. Requires confirm=true and an explicit user request.", InputSchema: map[string]any{
 				"type": "object", "additionalProperties": false,
 				"properties": map[string]any{
 					"node":    map[string]any{"type": "string", "description": "Node name or node ID"},
 					"confirm": map[string]any{"type": "boolean", "const": true, "description": "Must be true after the user explicitly requested deletion"},
 				}, "required": []string{"node", "confirm"},
-			}, OutputSchema: mutationSchema("removed", ""), Annotations: map[string]any{"title": "Remove JJP Node", "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": false}},
+			}, OutputSchema: mutationSchema("removed", ""), Annotations: map[string]any{"title": "Remove NodeScope Node", "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": false}},
 		)
 	}
 	return out
@@ -324,7 +324,7 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) (an
 		return s.API.Services(ctx, node)
 	case "rename_node":
 		if !s.AllowWrite {
-			return nil, fmt.Errorf("write tools are disabled; start jjp mcp with --allow-write")
+			return nil, fmt.Errorf("write tools are disabled; start nodescope mcp with --allow-write")
 		}
 		node, err := argString(raw, "node")
 		if err != nil {
@@ -340,7 +340,7 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) (an
 		return map[string]any{"renamed": true, "node": node, "new_name": newName}, nil
 	case "remove_node":
 		if !s.AllowWrite {
-			return nil, fmt.Errorf("write tools are disabled; start jjp mcp with --allow-write")
+			return nil, fmt.Errorf("write tools are disabled; start nodescope mcp with --allow-write")
 		}
 		node, err := argString(raw, "node")
 		if err != nil {
@@ -433,7 +433,7 @@ func modern(raw json.RawMessage) bool {
 }
 
 func serverMeta() map[string]any {
-	return map[string]any{"io.modelcontextprotocol/serverInfo": map[string]any{"name": "jjp", "version": protocol.Version}}
+	return map[string]any{"io.modelcontextprotocol/serverInfo": map[string]any{"name": "nodescope", "version": protocol.Version}}
 }
 
 func hasID(id json.RawMessage) bool { return len(id) > 0 && string(id) != "null" }
