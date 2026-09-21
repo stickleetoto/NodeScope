@@ -393,6 +393,11 @@ dist/SHA256SUMS.txt
 
 GitHub Actions runs tests, race detection, vet, all three cross-builds and checksums.
 
+## Development direction
+
+- [Technology research](docs/TECHNOLOGY_RESEARCH.md)
+- [Roadmap](docs/ROADMAP.md)
+
 ## Operational documentation
 
 - [Operations guide](docs/OPERATIONS.md)
