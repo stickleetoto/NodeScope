@@ -8,9 +8,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $env:CGO_ENABLED = "0"
 $targets = @(
-    @{ OS = "linux";   Arch = "amd64"; Out = "dist/jjp-linux-amd64" },
-    @{ OS = "linux";   Arch = "arm64"; Out = "dist/jjp-linux-arm64" },
-    @{ OS = "windows"; Arch = "amd64"; Out = "dist/jjp-windows-amd64.exe" }
+    @{ OS = "linux";   Arch = "amd64"; Out = "dist/nodescope-linux-amd64" },
+    @{ OS = "linux";   Arch = "arm64"; Out = "dist/nodescope-linux-arm64" },
+    @{ OS = "windows"; Arch = "amd64"; Out = "dist/nodescope-windows-amd64.exe" }
 )
 foreach ($t in $targets) {
     $env:GOOS = $t.OS
