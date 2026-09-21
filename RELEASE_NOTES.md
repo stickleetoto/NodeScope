@@ -1,3 +1,5 @@
+> **Rename note:** The project was renamed to **NodeScope** after the v1.1.0 release. This file preserves the original JJP v1.1.0 release naming and asset names for historical accuracy.
+
 # JJP v1.1.0 — Operational UX
 
 JJP v1.1.0 is a backwards-compatible V1 maintenance release focused on operator and AI query ergonomics. It does not add V2 remote-control capabilities.
