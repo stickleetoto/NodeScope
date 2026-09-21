@@ -97,7 +97,7 @@ func run() error {
 	case "rm", "remove":
 		return cmdRemove(os.Args[2:])
 	case "version", "--version", "-v":
-		fmt.Println("jjp", protocol.Version)
+		fmt.Println("nodescope", protocol.Version)
 		return nil
 	case "help", "--help", "-h":
 		usage()
@@ -108,41 +108,41 @@ func run() error {
 }
 
 func usage() {
-	fmt.Print(`jjp — lightweight distributed node monitoring
+	fmt.Print(`nodescope — lightweight distributed node monitoring
 
 Usage:
-  jjp host [--listen :7443] [--data PATH] [--tls-cert FILE --tls-key FILE]
+  nodescope host [--listen :7443] [--data PATH] [--tls-cert FILE --tls-key FILE]
            [--cpu-alert 90] [--ram-alert 90] [--disk-alert 90]
            [--metric-for 5m] [--unstable-after 15s] [--offline-after 60s]
-  jjp join <server> <join-token> [--name NAME] [--interval 5s]
-  jjp agent [--config PATH] [--interval 5s]
-  jjp install-agent [--config PATH] [--interval 5s] [--system]
-  jjp mcp [--server URL] [--token TOKEN] [--allow-write]
-  jjp token show [--kind all|join|read|admin] [--data PATH]
-  jjp token rotate <join|read|admin> [--server URL] [--admin-token TOKEN]
-  jjp state check [--data PATH] [--json]
-  jjp state backup [--data PATH] [--out PATH]
-  jjp state restore <backup> [--data PATH] --force
+  nodescope join <server> <join-token> [--name NAME] [--interval 5s]
+  nodescope agent [--config PATH] [--interval 5s]
+  nodescope install-agent [--config PATH] [--interval 5s] [--system]
+  nodescope mcp [--server URL] [--token TOKEN] [--allow-write]
+  nodescope token show [--kind all|join|read|admin] [--data PATH]
+  nodescope token rotate <join|read|admin> [--server URL] [--admin-token TOKEN]
+  nodescope state check [--data PATH] [--json]
+  nodescope state backup [--data PATH] [--out PATH]
+  nodescope state restore <backup> [--data PATH] --force
 
-  jjp service add <name> --tcp HOST:PORT
-  jjp service add <name> --http URL
-  jjp service add <name> --systemd UNIT
-  jjp service ls
-  jjp service rm <name>
+  nodescope service add <name> --tcp HOST:PORT
+  nodescope service add <name> --http URL
+  nodescope service add <name> --systemd UNIT
+  nodescope service ls
+  nodescope service rm <name>
 
-  jjp overview [--events 10] [--json] [--server URL] [--token TOKEN]
-  jjp health [--json] [--server URL] [--token TOKEN]
-  jjp diagnose <node> [--json] [--server URL] [--token TOKEN]
-  jjp doctor [--json] [--server URL] [--token TOKEN]
-  jjp ls [--json] [--server URL] [--token TOKEN]
-  jjp alerts [--node NODE] [--json] [--server URL] [--token TOKEN]
-  jjp events [--node NODE] [--since 24h] [--limit 50] [--json] [--server URL] [--token TOKEN]
-  jjp incidents [--node NODE] [--status open|resolved] [--since 24h] [--limit 50] [--json]
-  jjp incident <id> [--json] [--server URL] [--token TOKEN]
-  jjp show <node> [--json] [--server URL] [--token TOKEN]
-  jjp rename <node> <new-name> [--server URL] [--admin-token TOKEN]
-  jjp rm <node> [--server URL] [--admin-token TOKEN]
-  jjp version
+  nodescope overview [--events 10] [--json] [--server URL] [--token TOKEN]
+  nodescope health [--json] [--server URL] [--token TOKEN]
+  nodescope diagnose <node> [--json] [--server URL] [--token TOKEN]
+  nodescope doctor [--json] [--server URL] [--token TOKEN]
+  nodescope ls [--json] [--server URL] [--token TOKEN]
+  nodescope alerts [--node NODE] [--json] [--server URL] [--token TOKEN]
+  nodescope events [--node NODE] [--since 24h] [--limit 50] [--json] [--server URL] [--token TOKEN]
+  nodescope incidents [--node NODE] [--status open|resolved] [--since 24h] [--limit 50] [--json]
+  nodescope incident <id> [--json] [--server URL] [--token TOKEN]
+  nodescope show <node> [--json] [--server URL] [--token TOKEN]
+  nodescope rename <node> <new-name> [--server URL] [--admin-token TOKEN]
+  nodescope rm <node> [--server URL] [--admin-token TOKEN]
+  nodescope version
 
 Environment:
   JJP_SERVER       central server URL
@@ -259,7 +259,7 @@ func cmdHost(args []string) error {
 		}
 	}
 
-	fmt.Println("Jjamppong central server")
+	fmt.Println("NodeScope central server")
 	fmt.Println("Listen:     ", *listen)
 	fmt.Println("State:      ", *data)
 	fmt.Println("Schema:     ", st.SchemaVersion())
@@ -274,7 +274,7 @@ func cmdHost(args []string) error {
 		fmt.Println("Admin token:", st.AdminToken())
 		fmt.Println("Store these tokens securely; existing tokens are not printed on later starts.")
 	} else {
-		fmt.Println("Tokens:      existing (use 'jjp token show' locally when needed)")
+		fmt.Println("Tokens:      existing (use 'nodescope token show' locally when needed)")
 	}
 	fmt.Printf("Alerts:      CPU %.1f%% / RAM %.1f%% / Disk %.1f%% for %s; unstable %s; offline %s\n",
 		policy.CPUThreshold, policy.RAMThreshold, policy.DiskThreshold, policy.MetricFor, policy.UnstableAfter, policy.OfflineAfter)
@@ -336,7 +336,7 @@ func cmdJoin(args []string) error {
 		return err
 	}
 	if fs.NArg() < 2 {
-		return fmt.Errorf("usage: jjp join <server> <join-token> [--name NAME] [--interval 5s]")
+		return fmt.Errorf("usage: nodescope join <server> <join-token> [--name NAME] [--interval 5s]")
 	}
 	if *name == "" {
 		h, _ := os.Hostname()
@@ -398,29 +398,29 @@ func runAgentLoop(c agent.Config, interval time.Duration) error {
 
 func cmdMCP(args []string) error {
 	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
-	srv := fs.String("server", envOr("JJP_SERVER", "http://127.0.0.1:7443"), "central server URL")
-	token := fs.String("token", os.Getenv("JJP_API_TOKEN"), "API bearer token")
+	srv := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "central server URL")
+	token := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", ""), "API bearer token")
 	allowWrite := fs.Bool("allow-write", false, "expose rename/remove MCP tools (requires admin token)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *allowWrite {
 		if strings.TrimSpace(*token) == "" {
-			*token = os.Getenv("JJP_ADMIN_TOKEN")
+			*token = envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")
 		}
 		if strings.TrimSpace(*token) == "" {
 			*token = localToken("admin_token")
 		}
 	} else {
 		if strings.TrimSpace(*token) == "" {
-			*token = os.Getenv("JJP_ADMIN_TOKEN")
+			*token = envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")
 		}
 		if strings.TrimSpace(*token) == "" {
 			*token = localToken("read_token")
 		}
 	}
 	if strings.TrimSpace(*token) == "" {
-		return fmt.Errorf("MCP token required: set JJP_API_TOKEN (read-only) or JJP_ADMIN_TOKEN")
+		return fmt.Errorf("MCP token required: set NODESCOPE_API_TOKEN (read-only) or NODESCOPE_ADMIN_TOKEN (legacy JJP_* names are also accepted)")
 	}
 	api, err := apiclient.New(*srv, *token)
 	if err != nil {
@@ -429,7 +429,7 @@ func cmdMCP(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	// MCP stdio reserves stdout for JSON-RPC. Human diagnostics belong on stderr.
-	fmt.Fprintf(os.Stderr, "jjp MCP %s -> %s (write=%t)\n", protocol.Version, *srv, *allowWrite)
+	fmt.Fprintf(os.Stderr, "NodeScope MCP %s -> %s (write=%t)\n", protocol.Version, *srv, *allowWrite)
 	err = (&mcpserver.Server{API: api, AllowWrite: *allowWrite}).Run(ctx, os.Stdin, os.Stdout)
 	if errors.Is(err, context.Canceled) {
 		return nil
@@ -439,7 +439,7 @@ func cmdMCP(args []string) error {
 
 func cmdToken(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: jjp token <show|rotate>")
+		return fmt.Errorf("usage: nodescope token <show|rotate>")
 	}
 	switch args[0] {
 	case "show":
@@ -483,7 +483,7 @@ func cmdTokenShow(args []string) error {
 		return fmt.Errorf("decode state: %w", err)
 	}
 	if raw.SchemaVersion > store.CurrentSchemaVersion {
-		return fmt.Errorf("state schema %d is newer than this jjp supports", raw.SchemaVersion)
+		return fmt.Errorf("state schema %d is newer than this nodescope supports", raw.SchemaVersion)
 	}
 	printOne := func(label, token string) {
 		fmt.Printf("%-5s %s\n", label+":", token)
@@ -509,7 +509,7 @@ func cmdTokenRotate(args []string) error {
 		return err
 	}
 	if fs.NArg() < 1 {
-		return fmt.Errorf("usage: jjp token rotate <join|read|admin>")
+		return fmt.Errorf("usage: nodescope token rotate <join|read|admin>")
 	}
 	kind := strings.ToLower(strings.TrimSpace(fs.Arg(0)))
 	if kind != "join" && kind != "read" && kind != "admin" {
@@ -539,7 +539,7 @@ func cmdTokenRotate(args []string) error {
 
 func cmdState(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: jjp state <check|backup|restore>")
+		return fmt.Errorf("usage: nodescope state <check|backup|restore>")
 	}
 	switch args[0] {
 	case "check":
@@ -628,7 +628,7 @@ func cmdStateRestore(args []string) error {
 		return err
 	}
 	if fs.NArg() < 1 {
-		return fmt.Errorf("usage: jjp state restore <backup> [--data PATH] --force")
+		return fmt.Errorf("usage: nodescope state restore <backup> [--data PATH] --force")
 	}
 	if !*force {
 		return fmt.Errorf("restore requires --force; the current state will be replaced after an automatic pre-restore backup")
@@ -642,7 +642,7 @@ func cmdStateRestore(args []string) error {
 	}
 	lk, err := filelock.Acquire(path + ".lock")
 	if err != nil {
-		return fmt.Errorf("cannot restore while jjp host is using this state: %w", err)
+		return fmt.Errorf("cannot restore while nodescope host is using this state: %w", err)
 	}
 	defer lk.Release()
 	info, pre, err := store.RestoreState(path, fs.Arg(0))
@@ -682,7 +682,7 @@ func cmdInstallAgent(args []string) error {
 
 func cmdService(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: jjp service <add|ls|rm>")
+		return fmt.Errorf("usage: nodescope service <add|ls|rm>")
 	}
 	switch args[0] {
 	case "add":
@@ -707,7 +707,7 @@ func cmdServiceAdd(args []string) error {
 		return err
 	}
 	if fs.NArg() < 1 {
-		return fmt.Errorf("usage: jjp service add <name> (--tcp HOST:PORT | --http URL | --systemd UNIT)")
+		return fmt.Errorf("usage: nodescope service add <name> (--tcp HOST:PORT | --http URL | --systemd UNIT)")
 	}
 	typeName, target, count := "", "", 0
 	for kind, value := range map[string]string{"tcp": *tcpTarget, "http": *httpTarget, "systemd": *systemdTarget} {
@@ -775,7 +775,7 @@ func cmdServiceRemove(args []string) error {
 		return err
 	}
 	if fs.NArg() < 1 {
-		return fmt.Errorf("usage: jjp service rm <name>")
+		return fmt.Errorf("usage: nodescope service rm <name>")
 	}
 	p, err := resolveAgentConfig(*config)
 	if err != nil {
@@ -815,10 +815,10 @@ func resolveAgentConfig(v string) (string, error) {
 
 func readFlags(name string, args []string) (*flag.FlagSet, *string, *string, *bool, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	srv := fs.String("server", envOr("JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
-	defaultToken := os.Getenv("JJP_API_TOKEN")
+	srv := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
+	defaultToken := envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", "")
 	if defaultToken == "" {
-		defaultToken = os.Getenv("JJP_ADMIN_TOKEN")
+		defaultToken = envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")
 	}
 	tok := fs.String("token", defaultToken, "read or admin API token")
 	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
@@ -829,8 +829,8 @@ func readFlags(name string, args []string) (*flag.FlagSet, *string, *string, *bo
 
 func adminFlags(name string, args []string) (*flag.FlagSet, *string, *string, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	srv := fs.String("server", envOr("JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
-	tok := fs.String("admin-token", os.Getenv("JJP_ADMIN_TOKEN"), "admin token")
+	srv := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
+	tok := fs.String("admin-token", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", ""), "admin token")
 	args = reorderKnownFlags(args, map[string]bool{"--server": true, "--admin-token": true})
 	err := fs.Parse(args)
 	return fs, srv, tok, err
@@ -893,8 +893,8 @@ func parseSinceFlag(raw string) (time.Time, error) {
 
 func cmdHealth(args []string) error {
 	fs := flag.NewFlagSet("health", flag.ContinueOnError)
-	srv := fs.String("server", envOr("JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
-	tok := fs.String("token", envOr("JJP_API_TOKEN", os.Getenv("JJP_ADMIN_TOKEN")), "read or admin API token")
+	srv := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
+	tok := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")), "read or admin API token")
 	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
 	args = reorderKnownFlags(args, map[string]bool{"--server": true, "--token": true, "--json": false})
 	if err := fs.Parse(args); err != nil {
@@ -926,8 +926,8 @@ func cmdHealth(args []string) error {
 
 func cmdOverview(args []string) error {
 	fs := flag.NewFlagSet("overview", flag.ContinueOnError)
-	srv := fs.String("server", envOr("JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
-	tok := fs.String("token", envOr("JJP_API_TOKEN", os.Getenv("JJP_ADMIN_TOKEN")), "read or admin API token")
+	srv := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
+	tok := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")), "read or admin API token")
 	events := fs.Int("events", 10, "recent events to include (0-50)")
 	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
 	args = reorderKnownFlags(args, map[string]bool{"--server": true, "--token": true, "--events": true, "--json": false})
@@ -949,7 +949,7 @@ func cmdOverview(args []string) error {
 	if *jsonOut {
 		return printJSON(o)
 	}
-	fmt.Printf("JJP overview  [%s]\n", strings.ToUpper(o.Status))
+	fmt.Printf("NodeScope overview  [%s]\n", strings.ToUpper(o.Status))
 	fmt.Println(o.Headline)
 	if !o.AttentionRequired {
 		fmt.Println("No active problems need attention.")
@@ -985,15 +985,15 @@ func cmdOverview(args []string) error {
 
 func cmdDiagnose(args []string) error {
 	fs := flag.NewFlagSet("diagnose", flag.ContinueOnError)
-	srv := fs.String("server", envOr("JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
-	tok := fs.String("token", envOr("JJP_API_TOKEN", os.Getenv("JJP_ADMIN_TOKEN")), "read or admin API token")
+	srv := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
+	tok := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")), "read or admin API token")
 	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
 	args = reorderKnownFlags(args, map[string]bool{"--server": true, "--token": true, "--json": false})
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() < 1 {
-		return fmt.Errorf("usage: jjp diagnose <node> [--json]")
+		return fmt.Errorf("usage: nodescope diagnose <node> [--json]")
 	}
 	*tok = resolveReadToken(*tok)
 	api, err := apiclient.New(*srv, *tok)
@@ -1026,8 +1026,8 @@ func cmdDiagnose(args []string) error {
 
 func cmdDoctor(args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	srv := fs.String("server", envOr("JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
-	tok := fs.String("token", envOr("JJP_API_TOKEN", os.Getenv("JJP_ADMIN_TOKEN")), "read or admin API token")
+	srv := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
+	tok := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")), "read or admin API token")
 	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
 	args = reorderKnownFlags(args, map[string]bool{"--server": true, "--token": true, "--json": false})
 	if err := fs.Parse(args); err != nil {
@@ -1070,7 +1070,7 @@ func cmdDoctor(args []string) error {
 				add("state_schema", "pass", fmt.Sprintf("schema %d", info.StateSchema))
 			}
 			if *tok == "" {
-				add("authentication", "fail", "no read/admin token found; set JJP_API_TOKEN or pass --token")
+				add("authentication", "fail", "no read/admin token found; set NODESCOPE_API_TOKEN or pass --token")
 			} else if _, e := api.Summary(context.Background()); e != nil {
 				add("authentication", "fail", e.Error())
 			} else {
@@ -1096,7 +1096,7 @@ func cmdDoctor(args []string) error {
 	if *jsonOut {
 		return printJSON(report)
 	}
-	fmt.Printf("JJP doctor  [%s]\n", strings.ToUpper(report.Overall))
+	fmt.Printf("NodeScope doctor  [%s]\n", strings.ToUpper(report.Overall))
 	for _, c := range report.Checks {
 		mark := "·"
 		switch c.Status {
@@ -1145,8 +1145,8 @@ func cmdList(args []string) error {
 
 func cmdAlerts(args []string) error {
 	fs := flag.NewFlagSet("alerts", flag.ContinueOnError)
-	srv := fs.String("server", envOr("JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
-	tok := fs.String("token", envOr("JJP_API_TOKEN", os.Getenv("JJP_ADMIN_TOKEN")), "read or admin API token")
+	srv := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
+	tok := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")), "read or admin API token")
 	node := fs.String("node", "", "filter by node name or ID")
 	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
 	args = reorderKnownFlags(args, map[string]bool{"--server": true, "--token": true, "--node": true, "--json": false})
@@ -1184,8 +1184,8 @@ func cmdAlerts(args []string) error {
 
 func cmdEvents(args []string) error {
 	fs := flag.NewFlagSet("events", flag.ContinueOnError)
-	srv := fs.String("server", envOr("JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
-	tok := fs.String("token", envOr("JJP_API_TOKEN", os.Getenv("JJP_ADMIN_TOKEN")), "read or admin API token")
+	srv := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
+	tok := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")), "read or admin API token")
 	node := fs.String("node", "", "filter by node name or ID")
 	sinceRaw := fs.String("since", "", "only include events at or after this duration ago (e.g. 24h) or RFC3339 timestamp")
 	limit := fs.Int("limit", 50, "number of newest events (1-500)")
@@ -1237,8 +1237,8 @@ func cmdEvents(args []string) error {
 
 func cmdIncidents(args []string) error {
 	fs := flag.NewFlagSet("incidents", flag.ContinueOnError)
-	srv := fs.String("server", envOr("JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
-	tok := fs.String("token", envOr("JJP_API_TOKEN", os.Getenv("JJP_ADMIN_TOKEN")), "read or admin API token")
+	srv := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
+	tok := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")), "read or admin API token")
 	node := fs.String("node", "", "filter by node name or ID")
 	status := fs.String("status", "", "filter by incident status: open or resolved")
 	sinceRaw := fs.String("since", "", "only include incidents active at or after this duration ago (e.g. 24h) or RFC3339 timestamp")
@@ -1296,7 +1296,7 @@ func cmdIncident(args []string) error {
 		return err
 	}
 	if fs.NArg() < 1 {
-		return fmt.Errorf("usage: jjp incident <id> [--json]")
+		return fmt.Errorf("usage: nodescope incident <id> [--json]")
 	}
 	*tok = resolveReadToken(*tok)
 	api, err := apiclient.New(*srv, *tok)
@@ -1356,7 +1356,7 @@ func cmdShow(args []string) error {
 		return err
 	}
 	if fs.NArg() < 1 {
-		return fmt.Errorf("usage: jjp show <node>")
+		return fmt.Errorf("usage: nodescope show <node>")
 	}
 	if *tok == "" {
 		*tok = localToken("read_token")
@@ -1406,7 +1406,7 @@ func cmdRename(args []string) error {
 		return err
 	}
 	if fs.NArg() < 2 {
-		return fmt.Errorf("usage: jjp rename <node> <new-name>")
+		return fmt.Errorf("usage: nodescope rename <node> <new-name>")
 	}
 	if *tok == "" {
 		*tok = localAdminToken()
@@ -1425,7 +1425,7 @@ func cmdRemove(args []string) error {
 		return err
 	}
 	if fs.NArg() < 1 {
-		return fmt.Errorf("usage: jjp rm <node>")
+		return fmt.Errorf("usage: nodescope rm <node>")
 	}
 	if *tok == "" {
 		*tok = localAdminToken()
@@ -1502,6 +1502,16 @@ func localToken(key string) string {
 
 func envOr(k, d string) string {
 	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return d
+}
+
+func envCompat(primary, legacy, d string) string {
+	if v := os.Getenv(primary); v != "" {
+		return v
+	}
+	if v := os.Getenv(legacy); v != "" {
 		return v
 	}
 	return d
