@@ -35,15 +35,15 @@ func Install(configPath string, interval time.Duration, system bool) (string, er
 		if os.Geteuid() != 0 {
 			return "", fmt.Errorf("--system requires root; run with sudo")
 		}
-		unitPath = "/etc/systemd/system/jjp-agent.service"
-		installedExe = "/usr/local/bin/jjp"
+		unitPath = "/etc/systemd/system/nodescope-agent.service"
+		installedExe = "/usr/local/bin/nodescope"
 	} else {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
 		}
-		unitPath = filepath.Join(home, ".config", "systemd", "user", "jjp-agent.service")
-		installedExe = filepath.Join(home, ".local", "bin", "jjp")
+		unitPath = filepath.Join(home, ".config", "systemd", "user", "nodescope-agent.service")
+		installedExe = filepath.Join(home, ".local", "bin", "nodescope")
 		systemctlPrefix = []string{"--user"}
 	}
 
@@ -56,7 +56,7 @@ func Install(configPath string, interval time.Duration, system bool) (string, er
 		wantedBy = "multi-user.target"
 	}
 	unit := fmt.Sprintf(`[Unit]
-Description=Jjamppong node agent
+Description=NodeScope node agent
 After=network-online.target
 Wants=network-online.target
 
@@ -82,7 +82,7 @@ WantedBy=%s
 	if out, err := exec.Command("systemctl", args...).CombinedOutput(); err != nil {
 		return unitPath, fmt.Errorf("systemctl daemon-reload: %v: %s", err, strings.TrimSpace(string(out)))
 	}
-	args = append(append([]string{}, systemctlPrefix...), "enable", "--now", "jjp-agent.service")
+	args = append(append([]string{}, systemctlPrefix...), "enable", "--now", "nodescope-agent.service")
 	if out, err := exec.Command("systemctl", args...).CombinedOutput(); err != nil {
 		return unitPath, fmt.Errorf("systemctl enable: %v: %s", err, strings.TrimSpace(string(out)))
 	}

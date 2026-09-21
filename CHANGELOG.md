@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased - NodeScope rename
+
+### Changed
+- Renamed the product and primary CLI from **JJP / Jjamppong** to **NodeScope** / `nodescope`.
+- Renamed release binaries and CI artifacts to `nodescope-*`.
+- Renamed the MCP server identity and user-facing tool annotations to NodeScope.
+- Added `NODESCOPE_SERVER`, `NODESCOPE_API_TOKEN`, and `NODESCOPE_ADMIN_TOKEN` as the preferred environment variables while retaining legacy `JJP_*` aliases.
+- New Linux agent installs use `nodescope-agent.service` and the `nodescope` executable.
+- Kept HTTP API v1, state schema 1, legacy `X-JJP-*` compatibility headers, and the existing on-disk `jjp` state directory unchanged.
+
+
 ## 1.1.0 - 2026-08-25
 
 ### Added

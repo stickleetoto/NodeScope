@@ -1,6 +1,6 @@
-# jjp
+# NodeScope
 
-**jjp (Jjamppong)** is a lightweight, CLI-first distributed node observability system for humans and AI clients.
+**NodeScope** is a lightweight, CLI-first distributed node observability system for humans and AI clients.
 
 It intentionally has **no web dashboard**. A central server receives authenticated outbound heartbeats from agents and exposes the resulting health model through:
 
@@ -8,12 +8,12 @@ It intentionally has **no web dashboard**. A central server receives authenticat
 - HTTP API v1
 - stdio MCP for Claude/other MCP clients
 
-JJP v1 is the **Observe** generation: it gives operators and AI reliable visibility across servers. It does not execute remote shell commands or autonomously manage nodes.
+NodeScope v1 is the **Observe** generation: it gives operators and AI reliable visibility across servers. It does not execute remote shell commands or autonomously manage nodes.
 
 ## v1.1 highlights
 
-- `jjp health` gives a one-line fleet health probe and exit code `2` when attention is required
-- `jjp events --since 24h` and `jjp incidents --since 24h` bound historical queries by time
+- `nodescope health` gives a one-line fleet health probe and exit code `2` when attention is required
+- `nodescope events --since 24h` and `nodescope incidents --since 24h` bound historical queries by time
 - MCP history tools accept `since_minutes` so AI clients can answer time-window questions without reading unrelated history
 - Release/package metadata is prepared for GitMake-managed repository updates and GitHub Releases
 
@@ -40,7 +40,7 @@ JJP v1 is the **Observe** generation: it gives operators and AI reliable visibil
 ## Architecture
 
 ```text
-node agent ──outbound heartbeat──▶ jjp central ◀── CLI
+node agent ──outbound heartbeat──▶ nodescope central ◀── CLI
                                       ▲
                                       ├── HTTP API v1
                                       └── MCP ──▶ AI client
@@ -53,13 +53,13 @@ The central server never needs to open a connection back to an agent in v1.
 ### 1. Start central
 
 ```bash
-jjp host
+nodescope host
 ```
 
-On the **first** start, jjp prints the generated join/read/admin tokens once. Later starts do not print existing secrets into service logs.
+On the **first** start, nodescope prints the generated join/read/admin tokens once. Later starts do not print existing secrets into service logs.
 
 ```text
-Jjamppong central server
+NodeScope central server
 Listen:      :7443
 State:       .../jjp/server.json
 Schema:      1
@@ -72,16 +72,16 @@ Admin token: ...
 To view stored tokens intentionally on the central machine:
 
 ```bash
-jjp token show
-jjp token show --kind join
+nodescope token show
+nodescope token show --kind join
 ```
 
 For remote/untrusted networks, use TLS:
 
 ```bash
-jjp host --listen :7443 \
-  --tls-cert /etc/jjp/server.crt \
-  --tls-key /etc/jjp/server.key
+nodescope host --listen :7443 \
+  --tls-cert /etc/nodescope/server.crt \
+  --tls-key /etc/nodescope/server.key
 ```
 
 Plain HTTP should be limited to a trusted private LAN, loopback or trusted VPN/overlay network.
@@ -89,21 +89,21 @@ Plain HTTP should be limited to a trusted private LAN, loopback or trusted VPN/o
 ### 2. Join a node
 
 ```bash
-jjp join https://SERVER:7443 JOIN_TOKEN --name pi-main
+nodescope join https://SERVER:7443 JOIN_TOKEN --name pi-main
 ```
 
 The join command stores the per-node secret in the local agent config and begins sending heartbeats. Later:
 
 ```bash
-jjp agent
+nodescope agent
 ```
 
 Linux/systemd agent installation:
 
 ```bash
-jjp install-agent
+nodescope install-agent
 # or system-wide
-sudo jjp install-agent --system --config /home/USER/.config/jjp/agent.json
+sudo nodescope install-agent --system --config /home/USER/.config/jjp/agent.json
 ```
 
 ### 3. Inspect the fleet
@@ -112,39 +112,39 @@ sudo jjp install-agent --system --config /home/USER/.config/jjp/agent.json
 export JJP_SERVER=https://SERVER:7443
 export JJP_API_TOKEN=READ_TOKEN
 
-jjp overview
-jjp health
-jjp ls
-jjp alerts
-jjp incidents
-jjp events --limit 20
-jjp show pi-main
-jjp diagnose pi-main
-jjp doctor
+nodescope overview
+nodescope health
+nodescope ls
+nodescope alerts
+nodescope incidents
+nodescope events --limit 20
+nodescope show pi-main
+nodescope diagnose pi-main
+nodescope doctor
 ```
 
 Machine-readable output:
 
 ```bash
-jjp overview --json
-jjp health --json
-jjp diagnose pi-main --json
-jjp ls --json
-jjp show pi-main --json
-jjp alerts --json
-jjp incidents --json
-jjp incident INCIDENT_ID --json
-jjp events --json
-jjp doctor --json
+nodescope overview --json
+nodescope health --json
+nodescope diagnose pi-main --json
+nodescope ls --json
+nodescope show pi-main --json
+nodescope alerts --json
+nodescope incidents --json
+nodescope incident INCIDENT_ID --json
+nodescope events --json
+nodescope doctor --json
 ```
 
 ## Fleet health probe
 
-`jjp health` is intended for shell scripts, service checks, and quick operator checks:
+`nodescope health` is intended for shell scripts, service checks, and quick operator checks:
 
 ```bash
-jjp health
-jjp health --json
+nodescope health
+nodescope health --json
 ```
 
 It prints only the fleet-level status/headline. Exit code `0` means healthy. Exit code `2` means the fleet is degraded or critical and attention is required. Connection/configuration errors continue to use exit code `1`.
@@ -154,11 +154,11 @@ It prints only the fleet-level status/headline. Exit code `0` means healthy. Exi
 Service checks are configured on each agent.
 
 ```bash
-jjp service add bio --tcp 127.0.0.1:8787
-jjp service add api --http http://127.0.0.1:8080/healthz
-jjp service add nginx --systemd nginx
-jjp service ls
-jjp service rm bio
+nodescope service add bio --tcp 127.0.0.1:8787
+nodescope service add api --http http://127.0.0.1:8080/healthz
+nodescope service add nginx --systemd nginx
+nodescope service ls
+nodescope service rm bio
 ```
 
 Restart the agent after editing service checks.
@@ -189,7 +189,7 @@ service check DOWN      critical
 Custom policy values are persisted in central state:
 
 ```bash
-jjp host \
+nodescope host \
   --cpu-alert 85 \
   --ram-alert 90 \
   --disk-alert 95 \
@@ -203,11 +203,11 @@ Later starts can omit those flags and reuse the persisted policy.
 Incident correlation is **evidence-only**. Temporal proximity is not presented as a proven root cause.
 
 ```bash
-jjp incidents --status open
-jjp incidents --status resolved --node pi-main
-jjp incidents --since 24h
-jjp events --since 2h --limit 100
-jjp incident INCIDENT_ID
+nodescope incidents --status open
+nodescope incidents --status resolved --node pi-main
+nodescope incidents --since 24h
+nodescope events --since 2h --limit 100
+nodescope incident INCIDENT_ID
 ```
 
 ## MCP / AI usage
@@ -217,7 +217,7 @@ Start a read-only stdio MCP server:
 ```bash
 JJP_SERVER=https://SERVER:7443 \
 JJP_API_TOKEN=READ_TOKEN \
-jjp mcp
+nodescope mcp
 ```
 
 Read-only tools include:
@@ -250,7 +250,7 @@ For time-bounded historical questions, `get_incidents` and `get_recent_events` a
 Administrative registry tools can be exposed explicitly:
 
 ```bash
-JJP_ADMIN_TOKEN=ADMIN_TOKEN jjp mcp --allow-write
+JJP_ADMIN_TOKEN=ADMIN_TOKEN nodescope mcp --allow-write
 ```
 
 This adds `rename_node` and `remove_node`; `remove_node` also requires `confirm=true`.
@@ -260,8 +260,8 @@ Generic MCP configuration:
 ```json
 {
   "mcpServers": {
-    "jjp": {
-      "command": "/absolute/path/to/jjp",
+    "nodescope": {
+      "command": "/absolute/path/to/nodescope",
       "args": ["mcp"],
       "env": {
         "JJP_SERVER": "https://SERVER:7443",
@@ -273,6 +273,10 @@ Generic MCP configuration:
 ```
 
 MCP protocol traffic is written only to stdout; diagnostics use stderr.
+
+## Rename compatibility
+
+NodeScope was previously named **JJP / Jjamppong**. The public CLI and MCP identity now use `nodescope`, while the v1 API headers and on-disk `jjp` data directory remain unchanged for backwards compatibility. Existing `JJP_*` environment variables continue to work.
 
 ## HTTP API v1
 
@@ -312,38 +316,40 @@ Responses include `X-Request-ID`, `X-JJP-Version`, and `X-JJP-API-Version`. Stru
 
 ```bash
 export JJP_ADMIN_TOKEN=...
-jjp token rotate join
-jjp token rotate read
-jjp token rotate admin
+nodescope token rotate join
+nodescope token rotate read
+nodescope token rotate admin
 ```
 
 Rotation is immediate. Already-registered node secrets are unaffected by rotating the join token.
 
 ## State integrity, backup and restore
 
-Default central state is the OS user config directory's `jjp/server.json`. Agent config is `jjp/agent.json`.
+Default central state remains in the legacy-compatible OS user config paths `jjp/server.json` and `jjp/agent.json` so existing installations keep working after the rename.
+
+NodeScope prefers `NODESCOPE_SERVER`, `NODESCOPE_API_TOKEN`, and `NODESCOPE_ADMIN_TOKEN`. The legacy `JJP_*` environment variables are also accepted for compatibility.
 
 The central state contains credentials and node secrets. Never commit or publish it or its backups.
 
 Validate:
 
 ```bash
-jjp state check
-jjp state check --json
+nodescope state check
+nodescope state check --json
 ```
 
 Live backup:
 
 ```bash
-jjp state backup
-jjp state backup --out /secure/path/jjp.bak
+nodescope state backup
+nodescope state backup --out /secure/path/nodescope.bak
 ```
 
 Restore requires an explicit destructive flag and refuses to run while a central process owns the same state lock:
 
 ```bash
-# stop jjp host first
-jjp state restore /secure/path/jjp.bak --force
+# stop nodescope host first
+nodescope state restore /secure/path/nodescope.bak --force
 ```
 
 The current valid state is preserved automatically as a timestamped pre-restore backup before replacement.
@@ -353,7 +359,7 @@ State schema is currently **1**. v0.6 and earlier states are migrated on first o
 ## Doctor
 
 ```bash
-jjp doctor
+nodescope doctor
 ```
 
 Doctor verifies central reachability, API version, server/client version, state schema, read authentication and local agent configuration.
@@ -379,13 +385,18 @@ Release binaries:
 Both build scripts produce:
 
 ```text
-dist/jjp-linux-amd64
-dist/jjp-linux-arm64
-dist/jjp-windows-amd64.exe
+dist/nodescope-linux-amd64
+dist/nodescope-linux-arm64
+dist/nodescope-windows-amd64.exe
 dist/SHA256SUMS.txt
 ```
 
 GitHub Actions runs tests, race detection, vet, all three cross-builds and checksums.
+
+## Development direction
+
+- [Technology research](docs/TECHNOLOGY_RESEARCH.md)
+- [Roadmap](docs/ROADMAP.md)
 
 ## Operational documentation
 
@@ -395,7 +406,7 @@ GitHub Actions runs tests, race detection, vet, all three cross-builds and check
 
 ## Scope boundary
 
-**JJP v1 = Observe.**
+**NodeScope v1 = Observe.**
 
 It collects, validates, correlates and exposes server health. It does not provide AI-controlled remote service restart, shell, filesystem, package-manager, deployment or rollback operations.
 
