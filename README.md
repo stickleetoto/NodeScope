@@ -403,6 +403,8 @@ GitHub Actions runs tests, race detection, vet, all three cross-builds and check
 - [Operations guide](docs/OPERATIONS.md)
 - [Migration guide](docs/MIGRATION.md)
 - [Security notes](SECURITY.md)
+- [Technology radar](docs/TECHNOLOGY_RADAR.md)
+- [Roadmap](docs/ROADMAP.md)
 
 ## Scope boundary
 
