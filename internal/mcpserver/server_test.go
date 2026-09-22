@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jjp-monitor/jjp/internal/apiclient"
-	"github.com/jjp-monitor/jjp/internal/protocol"
-	jjpserver "github.com/jjp-monitor/jjp/internal/server"
-	"github.com/jjp-monitor/jjp/internal/store"
+	"github.com/stickleetoto/NodeScope/internal/apiclient"
+	"github.com/stickleetoto/NodeScope/internal/protocol"
+	jjpserver "github.com/stickleetoto/NodeScope/internal/server"
+	"github.com/stickleetoto/NodeScope/internal/store"
 )
 
 func TestLegacyMCPListAndSummary(t *testing.T) {
