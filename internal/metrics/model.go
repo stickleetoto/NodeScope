@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jjp-monitor/jjp/internal/protocol"
+	"github.com/stickleetoto/NodeScope/internal/protocol"
 )
 
 type MetricKind string
