@@ -17,6 +17,9 @@ func (s *Store) Compact(now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := s.rotateStaleHeadLocked(now); err != nil {
+		return err
+	}
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		return err
@@ -84,6 +87,40 @@ func (s *Store) Compact(now time.Time) error {
 	}
 	return s.pruneLocked()
 }
+
+func (s *Store) rotateStaleHeadLocked(now time.Time) error {
+	head := filepath.Join(s.dir, "head.jsonl")
+	if _, err := os.Stat(head); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	var oldest time.Time
+	err := scanRecords(head, func(rec record) error {
+		for _, sample := range rec.Samples {
+			ts := sample.Timestamp.UTC()
+			if ts.IsZero() {
+				continue
+			}
+			if oldest.IsZero() || ts.Before(oldest) {
+				oldest = ts
+			}
+		}
+		if !oldest.IsZero() {
+			return errStopScan
+		}
+		return nil
+	})
+	if err != nil && err != errStopScan {
+		return err
+	}
+	if oldest.IsZero() || oldest.After(now.Add(-s.opts.RawRetention)) {
+		return nil
+	}
+	return s.rotateHeadLocked(head)
+}
+
+var errStopScan = fmt.Errorf("stop history scan")
 
 func rollupRawFile(path string, bucket time.Duration) ([]RollupBucket, error) {
 	accs := map[string]*rollupAcc{}
