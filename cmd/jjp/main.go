@@ -69,6 +69,8 @@ func run() error {
 		return cmdService(os.Args[2:])
 	case "mcp":
 		return cmdMCP(os.Args[2:])
+	case "metrics":
+		return cmdMetrics(os.Args[2:])
 	case "token":
 		return cmdToken(os.Args[2:])
 	case "state":
@@ -119,6 +121,9 @@ Usage:
   nodescope agent [--config PATH] [--interval 5s]
   nodescope install-agent [--config PATH] [--interval 5s] [--system]
   nodescope mcp [--server URL] [--token TOKEN] [--allow-write]
+  nodescope metrics history <node> <metric> [--since 1h] [--limit 500] [--json]
+  nodescope metrics trend <node> <metric> [--since 1h] [--limit 500] [--json]
+  nodescope metrics stats [--json]
   nodescope token show [--kind all|join|read|admin] [--data PATH]
   nodescope token rotate <join|read|admin> [--server URL] [--admin-token TOKEN]
   nodescope state check [--data PATH] [--json]
@@ -402,6 +407,166 @@ func runAgentLoop(c agent.Config, interval time.Duration) error {
 		return nil
 	}
 	return err
+}
+
+func cmdMetrics(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: nodescope metrics <history|trend|stats>")
+	}
+	switch args[0] {
+	case "history":
+		return cmdMetricHistory(args[1:], false)
+	case "trend":
+		return cmdMetricHistory(args[1:], true)
+	case "stats":
+		return cmdMetricStats(args[1:])
+	default:
+		return fmt.Errorf("unknown metrics command %q", args[0])
+	}
+}
+
+func cmdMetricHistory(args []string, trend bool) error {
+	name := "metrics history"
+	if trend {
+		name = "metrics trend"
+	}
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	since := fs.Duration("since", time.Hour, "lookback duration")
+	limit := fs.Int("limit", 500, "maximum newest points")
+	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
+	serverURL := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
+	token := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")), "read/admin API token")
+	args = reorderKnownFlags(args, map[string]bool{"--since": true, "--limit": true, "--json": false, "--server": true, "--token": true})
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 2 {
+		return fmt.Errorf("usage: nodescope metrics %s <node> <metric> [--since 1h] [--limit 500] [--json]", map[bool]string{false: "history", true: "trend"}[trend])
+	}
+	if *since <= 0 {
+		return fmt.Errorf("--since must be greater than zero")
+	}
+	if *limit < 1 || *limit > 5000 {
+		return fmt.Errorf("--limit must be between 1 and 5000")
+	}
+	if strings.TrimSpace(*token) == "" {
+		return fmt.Errorf("read token required: set NODESCOPE_API_TOKEN or pass --token")
+	}
+	api, err := apiclient.New(*serverURL, *token)
+	if err != nil {
+		return err
+	}
+	points, err := api.MetricHistory(context.Background(), fs.Arg(0), fs.Arg(1), time.Now().UTC().Add(-*since), time.Time{}, *limit)
+	if err != nil {
+		return err
+	}
+	if !trend {
+		if *jsonOut {
+			return writePrettyJSON(points)
+		}
+		if len(points) == 0 {
+			fmt.Println("no metric samples")
+			return nil
+		}
+		for _, p := range points {
+			fmt.Printf("%s  %-32s  %g %s\n", p.Sample.Timestamp.Local().Format("2006-01-02 15:04:05"), p.Sample.Name, p.Sample.Value, p.Sample.Unit)
+		}
+		return nil
+	}
+
+	out := summarizeHistory(points, fs.Arg(0), fs.Arg(1))
+	if *jsonOut {
+		return writePrettyJSON(out)
+	}
+	fmt.Printf("%s / %s\n", fs.Arg(0), fs.Arg(1))
+	fmt.Printf("samples: %v\n", out["count"])
+	if len(points) == 0 {
+		return nil
+	}
+	fmt.Printf("first:   %g %s\n", out["first_value"], out["unit"])
+	fmt.Printf("last:    %g %s\n", out["last_value"], out["unit"])
+	fmt.Printf("min:     %g %s\n", out["min"], out["unit"])
+	fmt.Printf("max:     %g %s\n", out["max"], out["unit"])
+	fmt.Printf("average: %g %s\n", out["average"], out["unit"])
+	fmt.Printf("delta:   %g %s\n", out["delta"], out["unit"])
+	if rate, ok := out["rate_per_hour"]; ok {
+		fmt.Printf("rate/h:  %g %s/h\n", rate, out["unit"])
+	}
+	return nil
+}
+
+func cmdMetricStats(args []string) error {
+	fs := flag.NewFlagSet("metrics stats", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
+	serverURL := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
+	token := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")), "read/admin API token")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("usage: nodescope metrics stats [--json]")
+	}
+	if strings.TrimSpace(*token) == "" {
+		return fmt.Errorf("read token required: set NODESCOPE_API_TOKEN or pass --token")
+	}
+	api, err := apiclient.New(*serverURL, *token)
+	if err != nil {
+		return err
+	}
+	stats, err := api.MetricHistoryStats(context.Background())
+	if err != nil {
+		return err
+	}
+	if *jsonOut {
+		return writePrettyJSON(stats)
+	}
+	fmt.Printf("history: %s / %s max\n", bytesText(uint64(stats.Bytes)), bytesText(uint64(stats.MaxBytes)))
+	fmt.Printf("head:    %s\n", bytesText(uint64(stats.HeadBytes)))
+	fmt.Printf("segments: %d\n", stats.Segments)
+	fmt.Printf("nodes:    %d\n", len(stats.NodeAcks))
+	return nil
+}
+
+func summarizeHistory(points []history.Point, node, metric string) map[string]any {
+	out := map[string]any{"node": node, "metric": metric, "count": len(points)}
+	if len(points) == 0 {
+		return out
+	}
+	first := points[0].Sample
+	last := points[len(points)-1].Sample
+	minValue, maxValue := first.Value, first.Value
+	sum := 0.0
+	for _, p := range points {
+		if p.Sample.Value < minValue {
+			minValue = p.Sample.Value
+		}
+		if p.Sample.Value > maxValue {
+			maxValue = p.Sample.Value
+		}
+		sum += p.Sample.Value
+	}
+	out["kind"] = first.Kind
+	out["unit"] = first.Unit
+	out["first_value"] = first.Value
+	out["first_timestamp"] = first.Timestamp
+	out["last_value"] = last.Value
+	out["last_timestamp"] = last.Timestamp
+	out["min"] = minValue
+	out["max"] = maxValue
+	out["average"] = sum / float64(len(points))
+	out["delta"] = last.Value - first.Value
+	duration := last.Timestamp.Sub(first.Timestamp)
+	out["duration_seconds"] = duration.Seconds()
+	if duration > 0 {
+		out["rate_per_hour"] = (last.Value - first.Value) / duration.Hours()
+	}
+	return out
+}
+
+func writePrettyJSON(v any) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
 }
 
 func cmdMCP(args []string) error {
