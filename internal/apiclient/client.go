@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jjp-monitor/jjp/internal/history"
 	"github.com/jjp-monitor/jjp/internal/protocol"
 )
 
@@ -60,6 +61,13 @@ func (c *Client) Diagnosis(ctx context.Context, ref string) (protocol.Diagnosis,
 func (c *Client) Summary(ctx context.Context) (protocol.Summary, error) {
 	var out protocol.Summary
 	err := c.request(ctx, http.MethodGet, "/api/v1/summary", nil, http.StatusOK, &out)
+	return out, err
+}
+
+
+func (c *Client) SystemHealth(ctx context.Context) (protocol.SystemHealth, error) {
+	var out protocol.SystemHealth
+	err := c.request(ctx, http.MethodGet, "/api/v1/system/health", nil, http.StatusOK, &out)
 	return out, err
 }
 
@@ -133,6 +141,73 @@ func (c *Client) IncidentsSince(ctx context.Context, limit int, ref, status stri
 func (c *Client) Incident(ctx context.Context, id string) (protocol.IncidentDetail, error) {
 	var out protocol.IncidentDetail
 	err := c.request(ctx, http.MethodGet, "/api/v1/incidents/"+url.PathEscape(id), nil, http.StatusOK, &out)
+	return out, err
+}
+
+
+func (c *Client) MetricHistory(ctx context.Context, ref, metric string, since, until time.Time, limit int) ([]history.Point, error) {
+	return c.MetricHistoryFiltered(ctx, ref, metric, nil, since, until, limit)
+}
+
+func (c *Client) MetricHistoryFiltered(ctx context.Context, ref, metric string, attrs map[string]string, since, until time.Time, limit int) ([]history.Point, error) {
+	var out []history.Point
+	if limit <= 0 {
+		limit = 500
+	}
+	if limit > 5000 {
+		limit = 5000
+	}
+	q := url.Values{}
+	q.Set("limit", fmt.Sprintf("%d", limit))
+	if strings.TrimSpace(ref) != "" {
+		q.Set("node", ref)
+	}
+	if strings.TrimSpace(metric) != "" {
+		q.Set("metric", metric)
+	}
+	for k, v := range attrs {
+		q.Add("attr", k+"="+v)
+	}
+	if !since.IsZero() {
+		q.Set("since", since.UTC().Format(time.RFC3339))
+	}
+	if !until.IsZero() {
+		q.Set("until", until.UTC().Format(time.RFC3339))
+	}
+	err := c.request(ctx, http.MethodGet, "/api/v1/metrics/history?"+q.Encode(), nil, http.StatusOK, &out)
+	return out, err
+}
+
+func (c *Client) MetricHistoryStats(ctx context.Context) (history.Stats, error) {
+	var out history.Stats
+	err := c.request(ctx, http.MethodGet, "/api/v1/metrics/history/stats", nil, http.StatusOK, &out)
+	return out, err
+}
+
+
+func (c *Client) MetricRollup(ctx context.Context, ref, metric string, since, until time.Time, bucket time.Duration) ([]history.RollupBucket, error) {
+	return c.MetricRollupFiltered(ctx, ref, metric, nil, since, until, bucket)
+}
+
+func (c *Client) MetricRollupFiltered(ctx context.Context, ref, metric string, attrs map[string]string, since, until time.Time, bucket time.Duration) ([]history.RollupBucket, error) {
+	var out []history.RollupBucket
+	if bucket <= 0 {
+		bucket = time.Minute
+	}
+	q := url.Values{}
+	q.Set("node", ref)
+	q.Set("metric", metric)
+	q.Set("bucket", bucket.String())
+	for k, v := range attrs {
+		q.Add("attr", k+"="+v)
+	}
+	if !since.IsZero() {
+		q.Set("since", since.UTC().Format(time.RFC3339))
+	}
+	if !until.IsZero() {
+		q.Set("until", until.UTC().Format(time.RFC3339))
+	}
+	err := c.request(ctx, http.MethodGet, "/api/v1/metrics/rollup?"+q.Encode(), nil, http.StatusOK, &out)
 	return out, err
 }
 

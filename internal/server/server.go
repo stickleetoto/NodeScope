@@ -15,12 +15,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jjp-monitor/jjp/internal/history"
 	"github.com/jjp-monitor/jjp/internal/insight"
 	"github.com/jjp-monitor/jjp/internal/protocol"
 	"github.com/jjp-monitor/jjp/internal/store"
 )
 
-type Server struct{ Store *store.Store }
+type Server struct {
+	Store   *store.Store
+	History *history.Store
+	runtime *runtimeStats
+}
 
 func RandomToken(n int) (string, error) {
 	b := make([]byte, n)
@@ -31,6 +36,9 @@ func RandomToken(n int) (string, error) {
 }
 
 func (s *Server) Handler() http.Handler {
+	if s.runtime == nil {
+		s.runtime = newRuntimeStats()
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]string{"status": "ok", "version": protocol.Version})
@@ -39,6 +47,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/tokens/{kind}/rotate", s.rotateToken)
 	mux.HandleFunc("POST /api/v1/join", s.join)
 	mux.HandleFunc("POST /api/v1/heartbeat", s.heartbeat)
+	mux.HandleFunc("POST /api/v1/telemetry", s.telemetry)
+	mux.HandleFunc("GET /api/v1/metrics/history", s.metricHistory)
+	mux.HandleFunc("GET /api/v1/metrics/history/stats", s.metricHistoryStats)
+	mux.HandleFunc("GET /api/v1/metrics/rollup", s.metricRollup)
+	mux.HandleFunc("GET /api/v1/system/health", s.systemHealth)
 	mux.HandleFunc("GET /api/v1/summary", s.summary)
 	mux.HandleFunc("GET /api/v1/overview", s.overview)
 	mux.HandleFunc("GET /api/v1/unhealthy", s.unhealthy)
@@ -52,12 +65,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/nodes/{id}/diagnosis", s.diagnosis)
 	mux.HandleFunc("PATCH /api/v1/nodes/{id}", s.renameNode)
 	mux.HandleFunc("DELETE /api/v1/nodes/{id}", s.deleteNode)
-	return withAPIHeaders(withLimits(mux))
+	return withRuntimeStats(s.runtime, withAPIHeaders(withLimits(mux)))
 }
 
 func withLimits(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, 128<<10)
+		limit := int64(128 << 10)
+		if r.URL.Path == "/api/v1/telemetry" {
+			limit = 4 << 20
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -81,7 +98,7 @@ func requestID() string {
 }
 
 func (s *Server) info(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, protocol.APIInfo{Name: "jjp", Version: protocol.Version, APIVersion: protocol.APIVersion, StateSchema: s.Store.SchemaVersion()})
+	writeJSON(w, http.StatusOK, protocol.APIInfo{Name: "nodescope", Version: protocol.Version, APIVersion: protocol.APIVersion, StateSchema: s.Store.SchemaVersion()})
 }
 
 func (s *Server) join(w http.ResponseWriter, r *http.Request) {
@@ -161,7 +178,261 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, 500, "storage_failure", "storage failure")
 		return
 	}
+	s.runtime.heartbeats.Add(1)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) telemetry(w http.ResponseWriter, r *http.Request) {
+	if s.History == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "history_unavailable", "telemetry history is unavailable")
+		return
+	}
+	id := strings.TrimSpace(r.Header.Get("X-JJP-Node-ID"))
+	secret := bearer(r.Header.Get("Authorization"))
+	if id == "" || secret == "" {
+		writeAPIError(w, http.StatusUnauthorized, "missing_node_credentials", "missing node credentials")
+		return
+	}
+	if _, ok := s.Store.AuthenticateNode(id, secret); !ok {
+		writeAPIError(w, http.StatusUnauthorized, "invalid_node_credentials", "invalid node credentials")
+		return
+	}
+	var req protocol.TelemetryBatch
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request")
+		return
+	}
+	if err := validateTelemetryBatch(req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_telemetry", err.Error())
+		return
+	}
+	ack, err := s.History.Append(id, req)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "history_storage_failure", "failed to persist telemetry")
+		return
+	}
+	s.runtime.telemetryBatches.Add(1)
+	s.runtime.telemetrySamples.Add(uint64(ack.AcceptedSamples))
+	writeJSON(w, http.StatusOK, ack)
+}
+
+func (s *Server) systemHealth(w http.ResponseWriter, r *http.Request) {
+	if !s.readOK(r) {
+		writeAPIError(w, http.StatusUnauthorized, "unauthorized", "read or admin token required")
+		return
+	}
+	writeJSON(w, http.StatusOK, s.systemHealthSnapshot())
+}
+
+func (s *Server) metricHistory(w http.ResponseWriter, r *http.Request) {
+	if !s.readOK(r) {
+		writeAPIError(w, http.StatusUnauthorized, "unauthorized", "read or admin token required")
+		return
+	}
+	if s.History == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "history_unavailable", "telemetry history is unavailable")
+		return
+	}
+
+	nodeRef := strings.TrimSpace(r.URL.Query().Get("node"))
+	nodeID := ""
+	if nodeRef != "" {
+		v, ok := s.Store.ViewByNameOrID(nodeRef, time.Now().UTC())
+		if !ok {
+			writeAPIError(w, http.StatusNotFound, "node_not_found", "node not found")
+			return
+		}
+		nodeID = v.ID
+	}
+
+	since, err := parseHistoryTime("since", r.URL.Query().Get("since"))
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_since", err.Error())
+		return
+	}
+	until, err := parseHistoryTime("until", r.URL.Query().Get("until"))
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_until", err.Error())
+		return
+	}
+	if !since.IsZero() && !until.IsZero() && until.Before(since) {
+		writeAPIError(w, http.StatusBadRequest, "invalid_window", "until must be at or after since")
+		return
+	}
+
+	limit := 500
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 1 || v > 5000 {
+			writeAPIError(w, http.StatusBadRequest, "invalid_limit", "limit must be between 1 and 5000")
+			return
+		}
+		limit = v
+	}
+
+	attrs, err := parseHistoryAttributes(r.URL.Query()["attr"])
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_attribute_filter", err.Error())
+		return
+	}
+	points, err := s.History.Query(history.Query{
+		NodeID:     nodeID,
+		Metric:     strings.TrimSpace(r.URL.Query().Get("metric")),
+		Attributes: attrs,
+		Since:      since,
+		Until:      until,
+		Limit:      limit,
+	})
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "history_query_failure", "failed to query telemetry history")
+		return
+	}
+	writeJSON(w, http.StatusOK, points)
+}
+
+func (s *Server) metricRollup(w http.ResponseWriter, r *http.Request) {
+	if !s.readOK(r) {
+		writeAPIError(w, http.StatusUnauthorized, "unauthorized", "read or admin token required")
+		return
+	}
+	if s.History == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "history_unavailable", "telemetry history is unavailable")
+		return
+	}
+	nodeRef := strings.TrimSpace(r.URL.Query().Get("node"))
+	metric := strings.TrimSpace(r.URL.Query().Get("metric"))
+	if nodeRef == "" || metric == "" {
+		writeAPIError(w, http.StatusBadRequest, "missing_filter", "node and metric are required")
+		return
+	}
+	v, ok := s.Store.ViewByNameOrID(nodeRef, time.Now().UTC())
+	if !ok {
+		writeAPIError(w, http.StatusNotFound, "node_not_found", "node not found")
+		return
+	}
+	bucketRaw := strings.TrimSpace(r.URL.Query().Get("bucket"))
+	if bucketRaw == "" {
+		bucketRaw = "1m"
+	}
+	bucket, err := time.ParseDuration(bucketRaw)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_bucket", "bucket must be a valid duration")
+		return
+	}
+	since, err := parseHistoryTime("since", r.URL.Query().Get("since"))
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_since", err.Error())
+		return
+	}
+	until, err := parseHistoryTime("until", r.URL.Query().Get("until"))
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_until", err.Error())
+		return
+	}
+	if !since.IsZero() && !until.IsZero() && until.Before(since) {
+		writeAPIError(w, http.StatusBadRequest, "invalid_window", "until must be at or after since")
+		return
+	}
+	attrs, err := parseHistoryAttributes(r.URL.Query()["attr"])
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_attribute_filter", err.Error())
+		return
+	}
+	out, err := s.History.Rollup(history.Query{NodeID: v.ID, Metric: metric, Attributes: attrs, Since: since, Until: until}, bucket)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "rollup_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) metricHistoryStats(w http.ResponseWriter, r *http.Request) {
+	if !s.readOK(r) {
+		writeAPIError(w, http.StatusUnauthorized, "unauthorized", "read or admin token required")
+		return
+	}
+	if s.History == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "history_unavailable", "telemetry history is unavailable")
+		return
+	}
+	stats, err := s.History.Stats()
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "history_stats_failure", "failed to inspect telemetry history")
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
+func parseHistoryAttributes(values []string) (map[string]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	if len(values) > 8 {
+		return nil, fmt.Errorf("at most 8 attribute filters are allowed")
+	}
+	out := make(map[string]string, len(values))
+	for _, raw := range values {
+		k, v, ok := strings.Cut(raw, "=")
+		k = strings.TrimSpace(k)
+		if !ok || k == "" || len(k) > 64 || len(v) > 128 {
+			return nil, fmt.Errorf("attribute filters must use key=value with bounded lengths")
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
+func parseHistoryTime(name, raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	v, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%s must be an RFC3339 timestamp", name)
+	}
+	return v.UTC(), nil
+}
+
+func validateTelemetryBatch(req protocol.TelemetryBatch) error {
+	if req.Sequence == 0 {
+		return fmt.Errorf("sequence must be greater than zero")
+	}
+	if len(req.Samples) == 0 || len(req.Samples) > 4096 {
+		return fmt.Errorf("samples must contain between 1 and 4096 entries")
+	}
+	for i, sample := range req.Samples {
+		name := strings.TrimSpace(sample.Name)
+		if name == "" || len(name) > 128 {
+			return fmt.Errorf("sample %d name must be 1-128 characters", i)
+		}
+		for _, ch := range name {
+			if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '-') {
+				return fmt.Errorf("sample %d name contains unsupported characters", i)
+			}
+		}
+		if math.IsNaN(sample.Value) || math.IsInf(sample.Value, 0) {
+			return fmt.Errorf("sample %d value must be finite", i)
+		}
+		if sample.Kind != "gauge" && sample.Kind != "counter" {
+			return fmt.Errorf("sample %d kind must be gauge or counter", i)
+		}
+		if sample.Timestamp.IsZero() {
+			return fmt.Errorf("sample %d timestamp is required", i)
+		}
+		if len(sample.Unit) > 32 || len(sample.Collector) > 64 {
+			return fmt.Errorf("sample %d unit or collector is too long", i)
+		}
+		if len(sample.Attributes) > 8 {
+			return fmt.Errorf("sample %d has too many attributes", i)
+		}
+		for k, v := range sample.Attributes {
+			if strings.TrimSpace(k) == "" || len(k) > 64 || len(v) > 128 {
+				return fmt.Errorf("sample %d has an invalid attribute", i)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Server) rotateToken(w http.ResponseWriter, r *http.Request) {

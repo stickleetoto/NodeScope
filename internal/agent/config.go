@@ -31,6 +31,24 @@ func DefaultConfigPath() (string, error) {
 	return filepath.Join(d, "jjp", "agent.json"), nil
 }
 
+
+func DefaultTelemetryWALPath(nodeID string) (string, error) {
+	d, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return "", fmt.Errorf("node ID is required for telemetry WAL path")
+	}
+	for _, r := range nodeID {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_') {
+			return "", fmt.Errorf("node ID contains unsupported characters")
+		}
+	}
+	return filepath.Join(d, "jjp", "telemetry-"+nodeID+".wal"), nil
+}
+
 func SaveConfig(path string, c Config) error {
 	if err := ValidateConfig(c); err != nil {
 		return err

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -23,6 +24,7 @@ import (
 	"github.com/jjp-monitor/jjp/internal/apiclient"
 	"github.com/jjp-monitor/jjp/internal/autostart"
 	"github.com/jjp-monitor/jjp/internal/filelock"
+	"github.com/jjp-monitor/jjp/internal/history"
 	"github.com/jjp-monitor/jjp/internal/mcpserver"
 	"github.com/jjp-monitor/jjp/internal/protocol"
 	"github.com/jjp-monitor/jjp/internal/server"
@@ -68,6 +70,8 @@ func run() error {
 		return cmdService(os.Args[2:])
 	case "mcp":
 		return cmdMCP(os.Args[2:])
+	case "metrics":
+		return cmdMetrics(os.Args[2:])
 	case "token":
 		return cmdToken(os.Args[2:])
 	case "state":
@@ -118,6 +122,11 @@ Usage:
   nodescope agent [--config PATH] [--interval 5s]
   nodescope install-agent [--config PATH] [--interval 5s] [--system]
   nodescope mcp [--server URL] [--token TOKEN] [--allow-write]
+  nodescope metrics history <node> <metric> [--attr key=value] [--since 1h] [--limit 500] [--json]
+  nodescope metrics trend <node> <metric> [--attr key=value] [--since 1h] [--limit 500] [--json]
+  nodescope metrics rollup <node> <metric> [--attr key=value] [--since 24h] [--bucket 1m] [--json]
+  nodescope metrics stats [--json]
+  nodescope metrics system [--json]
   nodescope token show [--kind all|join|read|admin] [--data PATH]
   nodescope token rotate <join|read|admin> [--server URL] [--admin-token TOKEN]
   nodescope state check [--data PATH] [--json]
@@ -209,6 +218,16 @@ func cmdHost(args []string) error {
 		return err
 	}
 
+	historyDir := filepath.Join(filepath.Dir(*data), "history")
+	hist, err := history.Open(historyDir, history.DefaultOptions())
+	if err != nil {
+		return fmt.Errorf("open telemetry history: %w", err)
+	}
+
+	if err := hist.Compact(time.Now().UTC()); err != nil {
+		return fmt.Errorf("compact telemetry history: %w", err)
+	}
+
 	policy := st.AlertPolicy()
 	policyChanged := false
 	parsePercent := func(name, raw string, dst *float64) error {
@@ -263,6 +282,7 @@ func cmdHost(args []string) error {
 	fmt.Println("Listen:     ", *listen)
 	fmt.Println("State:      ", *data)
 	fmt.Println("Schema:     ", st.SchemaVersion())
+	fmt.Println("History:    ", historyDir)
 	if *tlsCert != "" {
 		fmt.Println("Transport:   HTTPS/TLS")
 	} else {
@@ -282,7 +302,7 @@ func cmdHost(args []string) error {
 
 	srv := &http.Server{
 		Addr:              *listen,
-		Handler:           (&server.Server{Store: st}).Handler(),
+		Handler:           (&server.Server{Store: st, History: hist}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
@@ -301,6 +321,20 @@ func cmdHost(args []string) error {
 			case now := <-ticker.C:
 				if err := st.Evaluate(now.UTC()); err != nil {
 					fmt.Fprintln(os.Stderr, "alert evaluator:", err)
+				}
+			}
+		}
+	}()
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-ticker.C:
+				if err := hist.Compact(now.UTC()); err != nil {
+					fmt.Fprintln(os.Stderr, "history compactor:", err)
 				}
 			}
 		}
@@ -380,20 +414,408 @@ func runAgentLoop(c agent.Config, interval time.Duration) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	fmt.Printf("Sending heartbeat to %s every %s. Ctrl+C to stop.\n", c.Server, interval)
-	lastFailed := false
+	hadIssue := false
 	err := agent.Run(ctx, c, interval, func(_ protocol.Metrics, _ []protocol.ServiceStatus, e error) {
 		if e != nil {
-			fmt.Printf("[%s] heartbeat failed: %v (retrying)\n", time.Now().Format("15:04:05"), e)
-			lastFailed = true
-		} else if lastFailed {
-			fmt.Printf("[%s] connection restored\n", time.Now().Format("15:04:05"))
-			lastFailed = false
+			fmt.Printf("[%s] agent cycle issue: %v\n", time.Now().Format("15:04:05"), e)
+			hadIssue = true
+		} else if hadIssue {
+			fmt.Printf("[%s] agent cycle healthy\n", time.Now().Format("15:04:05"))
+			hadIssue = false
 		}
 	})
 	if errors.Is(err, context.Canceled) {
 		return nil
 	}
 	return err
+}
+
+type stringListFlag []string
+
+func (v *stringListFlag) String() string {
+	return strings.Join(*v, ",")
+}
+
+func (v *stringListFlag) Set(raw string) error {
+	*v = append(*v, raw)
+	return nil
+}
+
+func parseCLIAttrs(values []string) (map[string]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	if len(values) > 8 {
+		return nil, fmt.Errorf("at most 8 --attr filters are allowed")
+	}
+	out := make(map[string]string, len(values))
+	for _, raw := range values {
+		k, val, ok := strings.Cut(raw, "=")
+		k = strings.TrimSpace(k)
+		if !ok || k == "" || len(k) > 64 || len(val) > 128 {
+			return nil, fmt.Errorf("--attr must use key=value with bounded lengths")
+		}
+		out[k] = val
+	}
+	return out, nil
+}
+
+func cmdMetrics(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: nodescope metrics <history|trend|rollup|stats|system>")
+	}
+	switch args[0] {
+	case "history":
+		return cmdMetricHistory(args[1:], false)
+	case "trend":
+		return cmdMetricHistory(args[1:], true)
+	case "rollup":
+		return cmdMetricRollup(args[1:])
+	case "stats":
+		return cmdMetricStats(args[1:])
+	case "system":
+		return cmdMetricSystem(args[1:])
+	default:
+		return fmt.Errorf("unknown metrics command %q", args[0])
+	}
+}
+
+func cmdMetricHistory(args []string, trend bool) error {
+	name := "metrics history"
+	if trend {
+		name = "metrics trend"
+	}
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	since := fs.Duration("since", time.Hour, "lookback duration")
+	limit := fs.Int("limit", 500, "maximum newest raw points")
+	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
+	var attrFlags stringListFlag
+	fs.Var(&attrFlags, "attr", "exact series attribute key=value (repeatable)")
+	serverURL := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
+	token := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")), "read/admin API token")
+	args = reorderKnownFlags(args, map[string]bool{"--since": true, "--limit": true, "--attr": true, "--json": false, "--server": true, "--token": true})
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 2 {
+		return fmt.Errorf("usage: nodescope metrics %s <node> <metric> [--since 1h] [--limit 500] [--json]", map[bool]string{false: "history", true: "trend"}[trend])
+	}
+	if *since <= 0 {
+		return fmt.Errorf("--since must be greater than zero")
+	}
+	if *limit < 1 || *limit > 5000 {
+		return fmt.Errorf("--limit must be between 1 and 5000")
+	}
+	if strings.TrimSpace(*token) == "" {
+		return fmt.Errorf("read token required: set NODESCOPE_API_TOKEN or pass --token")
+	}
+	api, err := apiclient.New(*serverURL, *token)
+	if err != nil {
+		return err
+	}
+	attrs, err := parseCLIAttrs(attrFlags)
+	if err != nil {
+		return err
+	}
+
+	if trend {
+		bucket := cliTrendBucket(*since)
+		buckets, err := api.MetricRollupFiltered(context.Background(), fs.Arg(0), fs.Arg(1), attrs, time.Now().UTC().Add(-*since), time.Time{}, bucket)
+		if err != nil {
+			return err
+		}
+		out := summarizeRollupHistory(buckets, fs.Arg(0), fs.Arg(1), bucket)
+		if *jsonOut {
+			return writePrettyJSON(out)
+		}
+		if required, _ := out["requires_attribute_filter"].(bool); required {
+			return fmt.Errorf("metric resolves to multiple series; repeat --attr key=value to select one series")
+		}
+		fmt.Printf("%s / %s  bucket=%s\n", fs.Arg(0), fs.Arg(1), bucket)
+		fmt.Printf("samples: %v\n", out["count"])
+		if len(buckets) == 0 {
+			return nil
+		}
+		fmt.Printf("first:   %g %s\n", out["first_value"], out["unit"])
+		fmt.Printf("last:    %g %s\n", out["last_value"], out["unit"])
+		fmt.Printf("min:     %g %s\n", out["min"], out["unit"])
+		fmt.Printf("max:     %g %s\n", out["max"], out["unit"])
+		fmt.Printf("average: %g %s\n", out["average"], out["unit"])
+		fmt.Printf("delta:   %g %s\n", out["delta"], out["unit"])
+		if rate, ok := out["rate_per_hour"]; ok {
+			fmt.Printf("rate/h:  %g %s/h\n", rate, out["unit"])
+		}
+		return nil
+	}
+
+	points, err := api.MetricHistoryFiltered(context.Background(), fs.Arg(0), fs.Arg(1), attrs, time.Now().UTC().Add(-*since), time.Time{}, *limit)
+	if err != nil {
+		return err
+	}
+	if *jsonOut {
+		return writePrettyJSON(points)
+	}
+	if len(points) == 0 {
+		fmt.Println("no metric samples")
+		return nil
+	}
+	for _, p := range points {
+		fmt.Printf("%s  %-32s  %g %s\n", p.Sample.Timestamp.Local().Format("2006-01-02 15:04:05"), p.Sample.Name, p.Sample.Value, p.Sample.Unit)
+	}
+	return nil
+}
+
+func cliTrendBucket(window time.Duration) time.Duration {
+	switch {
+	case window <= 6*time.Hour:
+		return time.Minute
+	case window <= 7*24*time.Hour:
+		return 5 * time.Minute
+	default:
+		return time.Hour
+	}
+}
+
+func summarizeRollupHistory(buckets []history.RollupBucket, node, metric string, bucket time.Duration) map[string]any {
+	out := map[string]any{"node": node, "metric": metric, "bucket": bucket.String(), "bucket_count": len(buckets)}
+	if len(buckets) == 0 {
+		out["count"] = 0
+		return out
+	}
+	series := map[string]map[string]string{}
+	for _, b := range buckets {
+		keyBytes, _ := json.Marshal(b.Attributes)
+		key := string(keyBytes)
+		if _, ok := series[key]; !ok {
+			attrs := make(map[string]string, len(b.Attributes))
+			for k, v := range b.Attributes {
+				attrs[k] = v
+			}
+			series[key] = attrs
+		}
+	}
+	if len(series) > 1 {
+		values := make([]map[string]string, 0, len(series))
+		for _, attrs := range series {
+			values = append(values, attrs)
+		}
+		out["count"] = 0
+		out["series_count"] = len(series)
+		out["series"] = values
+		out["requires_attribute_filter"] = true
+		return out
+	}
+	first := buckets[0]
+	last := buckets[len(buckets)-1]
+	minValue, maxValue := first.Min, first.Max
+	totalCount := 0
+	weightedSum := 0.0
+	for _, b := range buckets {
+		totalCount += b.Count
+		weightedSum += b.Average * float64(b.Count)
+		if b.Min < minValue {
+			minValue = b.Min
+		}
+		if b.Max > maxValue {
+			maxValue = b.Max
+		}
+	}
+	out["count"] = totalCount
+	out["kind"] = first.Kind
+	out["unit"] = first.Unit
+	out["first_value"] = first.First
+	out["first_timestamp"] = first.Start
+	out["last_value"] = last.Last
+	out["last_timestamp"] = last.End
+	out["min"] = minValue
+	out["max"] = maxValue
+	if totalCount > 0 {
+		out["average"] = weightedSum / float64(totalCount)
+	}
+	out["delta"] = last.Last - first.First
+	duration := last.End.Sub(first.Start)
+	out["duration_seconds"] = duration.Seconds()
+	if duration > 0 {
+		out["rate_per_hour"] = (last.Last - first.First) / duration.Hours()
+	}
+	return out
+}
+
+func cmdMetricRollup(args []string) error {
+	fs := flag.NewFlagSet("metrics rollup", flag.ContinueOnError)
+	since := fs.Duration("since", 24*time.Hour, "lookback duration")
+	bucket := fs.Duration("bucket", time.Minute, "rollup bucket")
+	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
+	var attrFlags stringListFlag
+	fs.Var(&attrFlags, "attr", "exact series attribute key=value (repeatable)")
+	serverURL := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
+	token := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")), "read/admin API token")
+	args = reorderKnownFlags(args, map[string]bool{"--since": true, "--bucket": true, "--attr": true, "--json": false, "--server": true, "--token": true})
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 2 {
+		return fmt.Errorf("usage: nodescope metrics rollup <node> <metric> [--since 24h] [--bucket 1m] [--json]")
+	}
+	if *since <= 0 {
+		return fmt.Errorf("--since must be greater than zero")
+	}
+	if *bucket < time.Minute || *bucket > 24*time.Hour {
+		return fmt.Errorf("--bucket must be between 1m and 24h")
+	}
+	if strings.TrimSpace(*token) == "" {
+		return fmt.Errorf("read token required: set NODESCOPE_API_TOKEN or pass --token")
+	}
+	api, err := apiclient.New(*serverURL, *token)
+	if err != nil {
+		return err
+	}
+	attrs, err := parseCLIAttrs(attrFlags)
+	if err != nil {
+		return err
+	}
+	out, err := api.MetricRollupFiltered(context.Background(), fs.Arg(0), fs.Arg(1), attrs, time.Now().UTC().Add(-*since), time.Time{}, *bucket)
+	if err != nil {
+		return err
+	}
+	if *jsonOut {
+		return writePrettyJSON(out)
+	}
+	if len(out) == 0 {
+		fmt.Println("no rollup buckets")
+		return nil
+	}
+	for _, b := range out {
+		fmt.Printf("%s  count=%d min=%g max=%g avg=%g last=%g %s%s\n",
+			b.Start.Local().Format("2006-01-02 15:04:05"), b.Count, b.Min, b.Max, b.Average, b.Last, b.Unit, formatAttrs(b.Attributes))
+	}
+	return nil
+}
+
+func cmdMetricSystem(args []string) error {
+	fs := flag.NewFlagSet("metrics system", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
+	serverURL := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
+	token := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")), "read/admin API token")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("usage: nodescope metrics system [--json]")
+	}
+	if strings.TrimSpace(*token) == "" {
+		return fmt.Errorf("read token required: set NODESCOPE_API_TOKEN or pass --token")
+	}
+	api, err := apiclient.New(*serverURL, *token)
+	if err != nil {
+		return err
+	}
+	health, err := api.SystemHealth(context.Background())
+	if err != nil {
+		return err
+	}
+	if *jsonOut {
+		return writePrettyJSON(health)
+	}
+	fmt.Printf("uptime:           %s\n", fmtDuration(health.UptimeSeconds))
+	fmt.Printf("requests:         %d  4xx=%d  5xx=%d\n", health.RequestsTotal, health.ClientErrorsTotal, health.ServerErrorsTotal)
+	fmt.Printf("request latency:  avg=%.2fms max=%.2fms\n", health.RequestAverageMS, health.RequestMaxMS)
+	fmt.Printf("heartbeats:       %d\n", health.HeartbeatsTotal)
+	fmt.Printf("telemetry:        %d batches / %d samples\n", health.TelemetryBatchesTotal, health.TelemetrySamplesTotal)
+	fmt.Printf("nodes:            %d total / %d online\n", health.NodesTotal, health.NodesOnline)
+	fmt.Printf("history:          %s / %s\n", bytesText(uint64(health.HistoryBytes)), bytesText(uint64(health.HistoryMaxBytes)))
+	fmt.Printf("history files:    %d raw segments / %d rollups (%s)\n", health.HistoryRawSegments, health.HistoryRollupFiles, bytesText(uint64(health.HistoryRollupBytes)))
+	return nil
+}
+
+func cmdMetricStats(args []string) error {
+	fs := flag.NewFlagSet("metrics stats", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
+	serverURL := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
+	token := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")), "read/admin API token")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("usage: nodescope metrics stats [--json]")
+	}
+	if strings.TrimSpace(*token) == "" {
+		return fmt.Errorf("read token required: set NODESCOPE_API_TOKEN or pass --token")
+	}
+	api, err := apiclient.New(*serverURL, *token)
+	if err != nil {
+		return err
+	}
+	stats, err := api.MetricHistoryStats(context.Background())
+	if err != nil {
+		return err
+	}
+	if *jsonOut {
+		return writePrettyJSON(stats)
+	}
+	fmt.Printf("history: %s / %s max\n", bytesText(uint64(stats.Bytes)), bytesText(uint64(stats.MaxBytes)))
+	fmt.Printf("head:    %s\n", bytesText(uint64(stats.HeadBytes)))
+	fmt.Printf("segments: %d\n", stats.Segments)
+	fmt.Printf("nodes:    %d\n", len(stats.NodeAcks))
+	return nil
+}
+
+func summarizeHistory(points []history.Point, node, metric string) map[string]any {
+	out := map[string]any{"node": node, "metric": metric, "count": len(points)}
+	if len(points) == 0 {
+		return out
+	}
+	first := points[0].Sample
+	last := points[len(points)-1].Sample
+	minValue, maxValue := first.Value, first.Value
+	sum := 0.0
+	for _, p := range points {
+		if p.Sample.Value < minValue {
+			minValue = p.Sample.Value
+		}
+		if p.Sample.Value > maxValue {
+			maxValue = p.Sample.Value
+		}
+		sum += p.Sample.Value
+	}
+	out["kind"] = first.Kind
+	out["unit"] = first.Unit
+	out["first_value"] = first.Value
+	out["first_timestamp"] = first.Timestamp
+	out["last_value"] = last.Value
+	out["last_timestamp"] = last.Timestamp
+	out["min"] = minValue
+	out["max"] = maxValue
+	out["average"] = sum / float64(len(points))
+	out["delta"] = last.Value - first.Value
+	duration := last.Timestamp.Sub(first.Timestamp)
+	out["duration_seconds"] = duration.Seconds()
+	if duration > 0 {
+		out["rate_per_hour"] = (last.Value - first.Value) / duration.Hours()
+	}
+	return out
+}
+
+func formatAttrs(attrs map[string]string) string {
+	if len(attrs) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(attrs))
+	for k := range attrs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var parts []string
+	for _, k := range keys {
+		parts = append(parts, k+"="+attrs[k])
+	}
+	return " [" + strings.Join(parts, ",") + "]"
+}
+
+func writePrettyJSON(v any) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
 }
 
 func cmdMCP(args []string) error {

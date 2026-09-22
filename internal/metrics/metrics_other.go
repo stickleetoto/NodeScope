@@ -7,6 +7,6 @@ import (
 	"github.com/jjp-monitor/jjp/internal/protocol"
 )
 
-func Collect() (protocol.Metrics, error) {
+func collectLegacy() (protocol.Metrics, error) {
 	return protocol.Metrics{}, fmt.Errorf("metrics collection is not implemented for this OS")
 }

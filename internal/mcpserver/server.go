@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jjp-monitor/jjp/internal/apiclient"
+	"github.com/jjp-monitor/jjp/internal/history"
 	"github.com/jjp-monitor/jjp/internal/protocol"
 )
 
@@ -169,7 +170,7 @@ func (s *Server) handle(ctx context.Context, req rpcRequest) (rpcResponse, bool)
 }
 
 func (s *Server) instructions() string {
-	base := "Use get_overview first for broad questions about current status or what needs attention. For historical outage questions, use get_incidents first, then get_incident for the selected timeline; use get_recent_events only when raw event-level detail is necessary. Use diagnose_node only when one node needs deeper current-state explanation. Prefer compact high-level tools over list_nodes to reduce unnecessary context. Incident correlation is deterministic by node and alert lifecycle; do not invent root causes that are not present in telemetry, findings, or event evidence."
+	base := "Use get_overview first for broad questions about current fleet status or what needs attention. Use get_system_health when the question is about NodeScope itself. For historical outage questions, use get_incidents first, then get_incident for the selected timeline; use get_recent_events only when raw event-level detail is necessary. Use diagnose_node only when one node needs deeper current-state explanation. Use get_node_trend for historical metric trends and get_metric_history only when raw metric evidence is needed. Prefer compact high-level tools over list_nodes to reduce unnecessary context. Incident correlation is deterministic by node and alert lifecycle; do not invent root causes that are not present in telemetry, findings, or event evidence."
 	if s.AllowWrite {
 		return base + " Rename/remove tools are enabled. Only mutate state when the user explicitly requests it. remove_node is destructive and requires confirm=true."
 	}
@@ -213,6 +214,17 @@ func (s *Server) tools() []toolDef {
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]any{"events": map[string]any{"type": "integer", "minimum": 0, "maximum": 50, "description": "Recent events to include (default 10; use 0 to omit history)"}},
 	}
+	historyArg := map[string]any{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]any{
+			"node":          map[string]any{"type": "string", "description": "Node name or node ID"},
+			"metric":        map[string]any{"type": "string", "description": "Exact metric name, for example system.memory.utilization"},
+			"attributes":    map[string]any{"type": "object", "maxProperties": 8, "additionalProperties": map[string]any{"type": "string"}, "description": "Optional exact series filters such as interface=eth0, direction=receive, device=nvme0n1, or mount=/data"},
+			"since_minutes": map[string]any{"type": "integer", "minimum": 1, "maximum": 525600, "description": "Lookback window in minutes (default 60)"},
+			"limit":         map[string]any{"type": "integer", "minimum": 1, "maximum": 5000, "description": "Maximum number of newest metric points (default 500)"},
+		},
+		"required": []string{"node", "metric"},
+	}
 	readAnn := func(title string) map[string]any {
 		return map[string]any{"title": title, "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
 	}
@@ -220,6 +232,7 @@ func (s *Server) tools() []toolDef {
 		{Name: "get_overview", Description: "Preferred first tool. Get a compact AI-oriented snapshot with overall health, attention flag, counts, unhealthy-node digests, active alerts, and recent events.", InputSchema: overviewArg, OutputSchema: overviewSchema(), Annotations: readAnn("NodeScope Overview")},
 		{Name: "diagnose_node", Description: "Explain one node using deterministic findings, evidence, severity, and suggested operator checks. Does not guess undocumented root causes.", InputSchema: nodeArg, OutputSchema: diagnosisSchema(), Annotations: readAnn("Diagnose NodeScope Node")},
 		{Name: "get_summary", Description: "Get aggregate NodeScope node, service, and active-alert counts.", InputSchema: empty, OutputSchema: summarySchema(), Annotations: readAnn("NodeScope Summary")},
+		{Name: "get_system_health", Description: "Inspect NodeScope itself: request/error rates, request latency, heartbeat and telemetry ingest counts, fleet size, and history storage usage.", InputSchema: empty, OutputSchema: systemHealthSchema(), Annotations: readAnn("NodeScope System Health")},
 		{Name: "get_unhealthy_nodes", Description: "List nodes that are offline/unstable or have active health problems.", InputSchema: empty, OutputSchema: arraySchema(nodeSchema()), Annotations: readAnn("Unhealthy NodeScope Nodes")},
 		{Name: "get_active_alerts", Description: "Get current unresolved NodeScope alerts, optionally filtered to one node.", InputSchema: filterArg, OutputSchema: arraySchema(alertSchema()), Annotations: readAnn("Active NodeScope Alerts")},
 		{Name: "get_incidents", Description: "Preferred historical health tool. Get correlated node incidents instead of raw event logs, optionally filtered by node, open/resolved status, and a lookback window.", InputSchema: incidentArg, OutputSchema: arraySchema(incidentSchema()), Annotations: readAnn("NodeScope Incidents")},
@@ -228,6 +241,9 @@ func (s *Server) tools() []toolDef {
 		{Name: "get_node", Description: "Get detailed status for one NodeScope node by name or ID.", InputSchema: nodeArg, OutputSchema: nodeSchema(), Annotations: readAnn("NodeScope Node Details")},
 		{Name: "list_services", Description: "Get monitored service states for one NodeScope node.", InputSchema: nodeArg, OutputSchema: arraySchema(serviceSchema()), Annotations: readAnn("NodeScope Node Services")},
 		{Name: "list_nodes", Description: "List every registered NodeScope node with full metrics and service health. Prefer get_overview for broad health questions because this can return much more context.", InputSchema: empty, OutputSchema: arraySchema(nodeSchema()), Annotations: readAnn("All NodeScope Nodes")},
+		{Name: "get_metric_history", Description: "Get bounded raw historical metric evidence for one node and exact metric name. Use a time window and prefer get_node_trend when aggregates are sufficient.", InputSchema: historyArg, OutputSchema: arraySchema(historyPointSchema()), Annotations: readAnn("NodeScope Metric History")},
+		{Name: "get_node_trend", Description: "Summarize one node metric over a bounded lookback window using stored samples: count, min, max, average, first, last, delta, and per-hour rate.", InputSchema: historyArg, OutputSchema: trendSchema(), Annotations: readAnn("NodeScope Metric Trend")},
+		{Name: "get_resource_peaks", Description: "Return deterministic min/max peak information for one node metric over a bounded lookback window.", InputSchema: historyArg, OutputSchema: trendSchema(), Annotations: readAnn("NodeScope Resource Peaks")},
 	}
 	if s.AllowWrite {
 		out = append(out,
@@ -266,6 +282,8 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) (an
 		return s.API.Diagnosis(ctx, node)
 	case "get_summary":
 		return s.API.Summary(ctx)
+	case "get_system_health":
+		return s.API.SystemHealth(ctx)
 	case "list_nodes":
 		return s.API.Nodes(ctx)
 	case "get_unhealthy_nodes":
@@ -322,6 +340,53 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) (an
 			return nil, err
 		}
 		return s.API.Services(ctx, node)
+	case "get_metric_history":
+		node, err := argString(raw, "node")
+		if err != nil {
+			return nil, err
+		}
+		metric, err := argString(raw, "metric")
+		if err != nil {
+			return nil, err
+		}
+		sinceMinutes, err := optionalInt(raw, "since_minutes", 60, 1, 525600)
+		if err != nil {
+			return nil, err
+		}
+		limit, err := optionalInt(raw, "limit", 500, 1, 5000)
+		if err != nil {
+			return nil, err
+		}
+		attrs, err := optionalStringMap(raw, "attributes", 8)
+		if err != nil {
+			return nil, err
+		}
+		since := time.Now().UTC().Add(-time.Duration(sinceMinutes) * time.Minute)
+		return s.API.MetricHistoryFiltered(ctx, node, metric, attrs, since, time.Time{}, limit)
+	case "get_node_trend", "get_resource_peaks":
+		node, err := argString(raw, "node")
+		if err != nil {
+			return nil, err
+		}
+		metric, err := argString(raw, "metric")
+		if err != nil {
+			return nil, err
+		}
+		sinceMinutes, err := optionalInt(raw, "since_minutes", 60, 1, 525600)
+		if err != nil {
+			return nil, err
+		}
+		attrs, err := optionalStringMap(raw, "attributes", 8)
+		if err != nil {
+			return nil, err
+		}
+		since := time.Now().UTC().Add(-time.Duration(sinceMinutes) * time.Minute)
+		bucket := trendBucket(time.Duration(sinceMinutes) * time.Minute)
+		buckets, err := s.API.MetricRollupFiltered(ctx, node, metric, attrs, since, time.Time{}, bucket)
+		if err != nil {
+			return nil, err
+		}
+		return summarizeRollupBuckets(node, metric, bucket, buckets), nil
 	case "rename_node":
 		if !s.AllowWrite {
 			return nil, fmt.Errorf("write tools are disabled; start nodescope mcp with --allow-write")
@@ -402,6 +467,36 @@ func optionalString(raw json.RawMessage, key string) string {
 	return strings.TrimSpace(v)
 }
 
+func optionalStringMap(raw json.RawMessage, key string, maxItems int) (map[string]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var args map[string]any
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return nil, fmt.Errorf("invalid tool arguments")
+	}
+	v, ok := args[key]
+	if !ok {
+		return nil, nil
+	}
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("argument %q must be an object", key)
+	}
+	if len(obj) > maxItems {
+		return nil, fmt.Errorf("argument %q may contain at most %d entries", key, maxItems)
+	}
+	out := make(map[string]string, len(obj))
+	for k, rawValue := range obj {
+		value, ok := rawValue.(string)
+		if !ok || strings.TrimSpace(k) == "" || len(k) > 64 || len(value) > 128 {
+			return nil, fmt.Errorf("argument %q contains an invalid attribute", key)
+		}
+		out[k] = value
+	}
+	return out, nil
+}
+
 func optionalInt(raw json.RawMessage, key string, def, min, max int) (int, error) {
 	if len(raw) == 0 {
 		return def, nil
@@ -444,6 +539,191 @@ func okResponse(id json.RawMessage, result any) rpcResponse {
 
 func errorResponse(id json.RawMessage, code int, message string) rpcResponse {
 	return rpcResponse{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: code, Message: message}}
+}
+
+func trendBucket(window time.Duration) time.Duration {
+	switch {
+	case window <= 6*time.Hour:
+		return time.Minute
+	case window <= 7*24*time.Hour:
+		return 5 * time.Minute
+	default:
+		return time.Hour
+	}
+}
+
+func summarizeRollupBuckets(node, metric string, bucket time.Duration, buckets []history.RollupBucket) map[string]any {
+	out := map[string]any{
+		"node": node,
+		"metric": metric,
+		"bucket_seconds": bucket.Seconds(),
+		"bucket_count": len(buckets),
+	}
+	if len(buckets) == 0 {
+		out["count"] = 0
+		return out
+	}
+	series := map[string]map[string]string{}
+	for _, b := range buckets {
+		keyBytes, _ := json.Marshal(b.Attributes)
+		key := string(keyBytes)
+		if _, ok := series[key]; !ok {
+			attrs := make(map[string]string, len(b.Attributes))
+			for k, v := range b.Attributes {
+				attrs[k] = v
+			}
+			series[key] = attrs
+		}
+	}
+	if len(series) > 1 {
+		values := make([]map[string]string, 0, len(series))
+		for _, attrs := range series {
+			values = append(values, attrs)
+		}
+		out["count"] = 0
+		out["series_count"] = len(series)
+		out["series"] = values
+		out["requires_attribute_filter"] = true
+		return out
+	}
+	first := buckets[0]
+	last := buckets[len(buckets)-1]
+	minBucket, maxBucket := first, first
+	totalCount := 0
+	weightedSum := 0.0
+	for _, b := range buckets {
+		totalCount += b.Count
+		weightedSum += b.Average * float64(b.Count)
+		if b.Min < minBucket.Min {
+			minBucket = b
+		}
+		if b.Max > maxBucket.Max {
+			maxBucket = b
+		}
+	}
+	out["count"] = totalCount
+	out["kind"] = first.Kind
+	out["unit"] = first.Unit
+	out["first"] = map[string]any{"value": first.First, "timestamp": first.Start}
+	out["last"] = map[string]any{"value": last.Last, "timestamp": last.End}
+	out["min"] = map[string]any{"value": minBucket.Min, "timestamp": minBucket.Start}
+	out["max"] = map[string]any{"value": maxBucket.Max, "timestamp": maxBucket.Start}
+	if totalCount > 0 {
+		out["average"] = weightedSum / float64(totalCount)
+	}
+	out["delta"] = last.Last - first.First
+	duration := last.End.Sub(first.Start)
+	out["duration_seconds"] = duration.Seconds()
+	if duration > 0 {
+		out["rate_per_hour"] = (last.Last - first.First) / duration.Hours()
+	}
+	return out
+}
+
+func summarizeMetricPoints(node, metric string, points []history.Point) map[string]any {
+	out := map[string]any{
+		"node": node,
+		"metric": metric,
+		"count": len(points),
+	}
+	if len(points) == 0 {
+		return out
+	}
+	first := points[0].Sample
+	last := points[len(points)-1].Sample
+	minPoint, maxPoint := points[0], points[0]
+	sum := 0.0
+	for _, p := range points {
+		sum += p.Sample.Value
+		if p.Sample.Value < minPoint.Sample.Value {
+			minPoint = p
+		}
+		if p.Sample.Value > maxPoint.Sample.Value {
+			maxPoint = p
+		}
+	}
+	out["kind"] = first.Kind
+	out["unit"] = first.Unit
+	out["first"] = map[string]any{"value": first.Value, "timestamp": first.Timestamp}
+	out["last"] = map[string]any{"value": last.Value, "timestamp": last.Timestamp}
+	out["min"] = map[string]any{"value": minPoint.Sample.Value, "timestamp": minPoint.Sample.Timestamp}
+	out["max"] = map[string]any{"value": maxPoint.Sample.Value, "timestamp": maxPoint.Sample.Timestamp}
+	out["average"] = sum / float64(len(points))
+	out["delta"] = last.Value - first.Value
+	duration := last.Timestamp.Sub(first.Timestamp)
+	out["duration_seconds"] = duration.Seconds()
+	if duration > 0 {
+		out["rate_per_hour"] = (last.Value - first.Value) / duration.Hours()
+	}
+	return out
+}
+
+func historyPointSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"node_id": map[string]any{"type": "string"},
+			"sequence": map[string]any{"type": "integer"},
+			"sample": map[string]any{"type": "object"},
+		},
+		"required": []string{"node_id", "sequence", "sample"},
+	}
+}
+
+func trendSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"node": map[string]any{"type": "string"},
+			"metric": map[string]any{"type": "string"},
+			"count": map[string]any{"type": "integer"},
+			"kind": map[string]any{"type": "string"},
+			"unit": map[string]any{"type": "string"},
+			"first": map[string]any{"type": "object"},
+			"last": map[string]any{"type": "object"},
+			"min": map[string]any{"type": "object"},
+			"max": map[string]any{"type": "object"},
+			"average": map[string]any{"type": "number"},
+			"delta": map[string]any{"type": "number"},
+			"duration_seconds": map[string]any{"type": "number"},
+			"rate_per_hour": map[string]any{"type": "number"},
+			"series_count": map[string]any{"type": "integer"},
+			"series": map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"requires_attribute_filter": map[string]any{"type": "boolean"},
+		},
+		"required": []string{"node", "metric", "count"},
+	}
+}
+
+func systemHealthSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"generated_at": map[string]any{"type": "string"},
+			"uptime_seconds": map[string]any{"type": "integer"},
+			"requests_total": map[string]any{"type": "integer"},
+			"client_errors_total": map[string]any{"type": "integer"},
+			"server_errors_total": map[string]any{"type": "integer"},
+			"request_average_ms": map[string]any{"type": "number"},
+			"request_max_ms": map[string]any{"type": "number"},
+			"heartbeats_total": map[string]any{"type": "integer"},
+			"telemetry_batches_total": map[string]any{"type": "integer"},
+			"telemetry_samples_total": map[string]any{"type": "integer"},
+			"nodes_total": map[string]any{"type": "integer"},
+			"nodes_online": map[string]any{"type": "integer"},
+			"history_bytes": map[string]any{"type": "integer"},
+			"history_max_bytes": map[string]any{"type": "integer"},
+			"history_raw_segments": map[string]any{"type": "integer"},
+			"history_rollup_files": map[string]any{"type": "integer"},
+			"history_rollup_bytes": map[string]any{"type": "integer"},
+		},
+		"required": []string{
+			"generated_at", "uptime_seconds", "requests_total", "client_errors_total", "server_errors_total",
+			"request_average_ms", "request_max_ms", "heartbeats_total", "telemetry_batches_total",
+			"telemetry_samples_total", "nodes_total", "nodes_online", "history_bytes", "history_max_bytes",
+			"history_raw_segments", "history_rollup_files", "history_rollup_bytes",
+		},
+	}
 }
 
 func summarySchema() map[string]any {

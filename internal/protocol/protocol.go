@@ -3,7 +3,7 @@ package protocol
 import "time"
 
 const (
-	Version    = "1.1.0"
+	Version    = "1.2.0-dev"
 	APIVersion = "v1"
 )
 
@@ -52,6 +52,27 @@ type ServiceStatus struct {
 type HeartbeatRequest struct {
 	Metrics  Metrics         `json:"metrics"`
 	Services []ServiceStatus `json:"services,omitempty"`
+}
+
+
+type TelemetrySample struct {
+	Name       string            `json:"name"`
+	Value      float64           `json:"value"`
+	Unit       string            `json:"unit,omitempty"`
+	Kind       string            `json:"kind"`
+	Timestamp  time.Time         `json:"timestamp"`
+	Attributes map[string]string `json:"attributes,omitempty"`
+	Collector  string            `json:"collector,omitempty"`
+}
+
+type TelemetryBatch struct {
+	Sequence uint64            `json:"sequence"`
+	Samples  []TelemetrySample `json:"samples"`
+}
+
+type TelemetryAck struct {
+	DurableSequence uint64 `json:"durable_sequence"`
+	AcceptedSamples int    `json:"accepted_samples"`
 }
 
 type Node struct {
@@ -215,4 +236,25 @@ type DoctorReport struct {
 	ServerURL string        `json:"server_url"`
 	Overall   string        `json:"overall"`
 	Checks    []DoctorCheck `json:"checks"`
+}
+
+
+type SystemHealth struct {
+	GeneratedAt            time.Time `json:"generated_at"`
+	UptimeSeconds          uint64    `json:"uptime_seconds"`
+	RequestsTotal          uint64    `json:"requests_total"`
+	ClientErrorsTotal      uint64    `json:"client_errors_total"`
+	ServerErrorsTotal      uint64    `json:"server_errors_total"`
+	RequestAverageMS       float64   `json:"request_average_ms"`
+	RequestMaxMS           float64   `json:"request_max_ms"`
+	HeartbeatsTotal        uint64    `json:"heartbeats_total"`
+	TelemetryBatchesTotal  uint64    `json:"telemetry_batches_total"`
+	TelemetrySamplesTotal  uint64    `json:"telemetry_samples_total"`
+	NodesTotal             int       `json:"nodes_total"`
+	NodesOnline            int       `json:"nodes_online"`
+	HistoryBytes           int64     `json:"history_bytes"`
+	HistoryMaxBytes        int64     `json:"history_max_bytes"`
+	HistoryRawSegments     int       `json:"history_raw_segments"`
+	HistoryRollupFiles     int       `json:"history_rollup_files"`
+	HistoryRollupBytes     int64     `json:"history_rollup_bytes"`
 }
