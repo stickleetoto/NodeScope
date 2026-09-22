@@ -254,12 +254,18 @@ func (s *Server) metricHistory(w http.ResponseWriter, r *http.Request) {
 		limit = v
 	}
 
+	attrs, err := parseHistoryAttributes(r.URL.Query()["attr"])
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_attribute_filter", err.Error())
+		return
+	}
 	points, err := s.History.Query(history.Query{
-		NodeID: nodeID,
-		Metric: strings.TrimSpace(r.URL.Query().Get("metric")),
-		Since:  since,
-		Until:  until,
-		Limit:  limit,
+		NodeID:     nodeID,
+		Metric:     strings.TrimSpace(r.URL.Query().Get("metric")),
+		Attributes: attrs,
+		Since:      since,
+		Until:      until,
+		Limit:      limit,
 	})
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "history_query_failure", "failed to query telemetry history")
@@ -311,7 +317,12 @@ func (s *Server) metricRollup(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_window", "until must be at or after since")
 		return
 	}
-	out, err := s.History.Rollup(history.Query{NodeID: v.ID, Metric: metric, Since: since, Until: until}, bucket)
+	attrs, err := parseHistoryAttributes(r.URL.Query()["attr"])
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_attribute_filter", err.Error())
+		return
+	}
+	out, err := s.History.Rollup(history.Query{NodeID: v.ID, Metric: metric, Attributes: attrs, Since: since, Until: until}, bucket)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "rollup_failed", err.Error())
 		return
@@ -334,6 +345,25 @@ func (s *Server) metricHistoryStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, stats)
+}
+
+func parseHistoryAttributes(values []string) (map[string]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	if len(values) > 8 {
+		return nil, fmt.Errorf("at most 8 attribute filters are allowed")
+	}
+	out := make(map[string]string, len(values))
+	for _, raw := range values {
+		k, v, ok := strings.Cut(raw, "=")
+		k = strings.TrimSpace(k)
+		if !ok || k == "" || len(k) > 64 || len(v) > 128 {
+			return nil, fmt.Errorf("attribute filters must use key=value with bounded lengths")
+		}
+		out[k] = v
+	}
+	return out, nil
 }
 
 func parseHistoryTime(name, raw string) (time.Time, error) {
