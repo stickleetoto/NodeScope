@@ -242,5 +242,5 @@ func parsePSI(resource string, b []byte, ts time.Time) ([]Sample, error) {
 }
 
 func platformCollectors() []Collector {
-	return []Collector{loadCollector{}, swapCollector{}, networkCollector{}, psiCollector{}}
+	return []Collector{loadCollector{}, swapCollector{}, networkCollector{}, filesystemCollector{}, diskIOCollector{}, psiCollector{}}
 }
