@@ -121,9 +121,9 @@ Usage:
   nodescope agent [--config PATH] [--interval 5s]
   nodescope install-agent [--config PATH] [--interval 5s] [--system]
   nodescope mcp [--server URL] [--token TOKEN] [--allow-write]
-  nodescope metrics history <node> <metric> [--since 1h] [--limit 500] [--json]
-  nodescope metrics trend <node> <metric> [--since 1h] [--limit 500] [--json]
-  nodescope metrics rollup <node> <metric> [--since 24h] [--bucket 1m] [--json]
+  nodescope metrics history <node> <metric> [--attr key=value] [--since 1h] [--limit 500] [--json]
+  nodescope metrics trend <node> <metric> [--attr key=value] [--since 1h] [--limit 500] [--json]
+  nodescope metrics rollup <node> <metric> [--attr key=value] [--since 24h] [--bucket 1m] [--json]
   nodescope metrics stats [--json]
   nodescope token show [--kind all|join|read|admin] [--data PATH]
   nodescope token rotate <join|read|admin> [--server URL] [--admin-token TOKEN]
@@ -410,6 +410,36 @@ func runAgentLoop(c agent.Config, interval time.Duration) error {
 	return err
 }
 
+type stringListFlag []string
+
+func (v *stringListFlag) String() string {
+	return strings.Join(*v, ",")
+}
+
+func (v *stringListFlag) Set(raw string) error {
+	*v = append(*v, raw)
+	return nil
+}
+
+func parseCLIAttrs(values []string) (map[string]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	if len(values) > 8 {
+		return nil, fmt.Errorf("at most 8 --attr filters are allowed")
+	}
+	out := make(map[string]string, len(values))
+	for _, raw := range values {
+		k, val, ok := strings.Cut(raw, "=")
+		k = strings.TrimSpace(k)
+		if !ok || k == "" || len(k) > 64 || len(val) > 128 {
+			return nil, fmt.Errorf("--attr must use key=value with bounded lengths")
+		}
+		out[k] = val
+	}
+	return out, nil
+}
+
 func cmdMetrics(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: nodescope metrics <history|trend|stats>")
@@ -437,9 +467,11 @@ func cmdMetricHistory(args []string, trend bool) error {
 	since := fs.Duration("since", time.Hour, "lookback duration")
 	limit := fs.Int("limit", 500, "maximum newest raw points")
 	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
+	var attrFlags stringListFlag
+	fs.Var(&attrFlags, "attr", "exact series attribute key=value (repeatable)")
 	serverURL := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
 	token := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")), "read/admin API token")
-	args = reorderKnownFlags(args, map[string]bool{"--since": true, "--limit": true, "--json": false, "--server": true, "--token": true})
+	args = reorderKnownFlags(args, map[string]bool{"--since": true, "--limit": true, "--attr": true, "--json": false, "--server": true, "--token": true})
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -459,10 +491,14 @@ func cmdMetricHistory(args []string, trend bool) error {
 	if err != nil {
 		return err
 	}
+	attrs, err := parseCLIAttrs(attrFlags)
+	if err != nil {
+		return err
+	}
 
 	if trend {
 		bucket := cliTrendBucket(*since)
-		buckets, err := api.MetricRollup(context.Background(), fs.Arg(0), fs.Arg(1), time.Now().UTC().Add(-*since), time.Time{}, bucket)
+		buckets, err := api.MetricRollupFiltered(context.Background(), fs.Arg(0), fs.Arg(1), attrs, time.Now().UTC().Add(-*since), time.Time{}, bucket)
 		if err != nil {
 			return err
 		}
@@ -487,7 +523,7 @@ func cmdMetricHistory(args []string, trend bool) error {
 		return nil
 	}
 
-	points, err := api.MetricHistory(context.Background(), fs.Arg(0), fs.Arg(1), time.Now().UTC().Add(-*since), time.Time{}, *limit)
+	points, err := api.MetricHistoryFiltered(context.Background(), fs.Arg(0), fs.Arg(1), attrs, time.Now().UTC().Add(-*since), time.Time{}, *limit)
 	if err != nil {
 		return err
 	}
@@ -562,9 +598,11 @@ func cmdMetricRollup(args []string) error {
 	since := fs.Duration("since", 24*time.Hour, "lookback duration")
 	bucket := fs.Duration("bucket", time.Minute, "rollup bucket")
 	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
+	var attrFlags stringListFlag
+	fs.Var(&attrFlags, "attr", "exact series attribute key=value (repeatable)")
 	serverURL := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
 	token := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")), "read/admin API token")
-	args = reorderKnownFlags(args, map[string]bool{"--since": true, "--bucket": true, "--json": false, "--server": true, "--token": true})
+	args = reorderKnownFlags(args, map[string]bool{"--since": true, "--bucket": true, "--attr": true, "--json": false, "--server": true, "--token": true})
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -584,7 +622,11 @@ func cmdMetricRollup(args []string) error {
 	if err != nil {
 		return err
 	}
-	out, err := api.MetricRollup(context.Background(), fs.Arg(0), fs.Arg(1), time.Now().UTC().Add(-*since), time.Time{}, *bucket)
+	attrs, err := parseCLIAttrs(attrFlags)
+	if err != nil {
+		return err
+	}
+	out, err := api.MetricRollupFiltered(context.Background(), fs.Arg(0), fs.Arg(1), attrs, time.Now().UTC().Add(-*since), time.Time{}, *bucket)
 	if err != nil {
 		return err
 	}
