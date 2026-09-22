@@ -54,6 +54,27 @@ type HeartbeatRequest struct {
 	Services []ServiceStatus `json:"services,omitempty"`
 }
 
+
+type TelemetrySample struct {
+	Name       string            `json:"name"`
+	Value      float64           `json:"value"`
+	Unit       string            `json:"unit,omitempty"`
+	Kind       string            `json:"kind"`
+	Timestamp  time.Time         `json:"timestamp"`
+	Attributes map[string]string `json:"attributes,omitempty"`
+	Collector  string            `json:"collector,omitempty"`
+}
+
+type TelemetryBatch struct {
+	Sequence uint64            `json:"sequence"`
+	Samples  []TelemetrySample `json:"samples"`
+}
+
+type TelemetryAck struct {
+	DurableSequence uint64 `json:"durable_sequence"`
+	AcceptedSamples int    `json:"accepted_samples"`
+}
+
 type Node struct {
 	ID            string          `json:"id"`
 	Name          string          `json:"name"`
