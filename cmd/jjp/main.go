@@ -657,8 +657,8 @@ func cmdMetricRollup(args []string) error {
 	if *since <= 0 {
 		return fmt.Errorf("--since must be greater than zero")
 	}
-	if *bucket < time.Second || *bucket > 24*time.Hour {
-		return fmt.Errorf("--bucket must be between 1s and 24h")
+	if *bucket < time.Minute || *bucket > 24*time.Hour {
+		return fmt.Errorf("--bucket must be between 1m and 24h")
 	}
 	if strings.TrimSpace(*token) == "" {
 		return fmt.Errorf("read token required: set NODESCOPE_API_TOKEN or pass --token")
