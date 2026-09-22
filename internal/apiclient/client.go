@@ -139,6 +139,10 @@ func (c *Client) Incident(ctx context.Context, id string) (protocol.IncidentDeta
 
 
 func (c *Client) MetricHistory(ctx context.Context, ref, metric string, since, until time.Time, limit int) ([]history.Point, error) {
+	return c.MetricHistoryFiltered(ctx, ref, metric, nil, since, until, limit)
+}
+
+func (c *Client) MetricHistoryFiltered(ctx context.Context, ref, metric string, attrs map[string]string, since, until time.Time, limit int) ([]history.Point, error) {
 	var out []history.Point
 	if limit <= 0 {
 		limit = 500
@@ -153,6 +157,9 @@ func (c *Client) MetricHistory(ctx context.Context, ref, metric string, since, u
 	}
 	if strings.TrimSpace(metric) != "" {
 		q.Set("metric", metric)
+	}
+	for k, v := range attrs {
+		q.Add("attr", k+"="+v)
 	}
 	if !since.IsZero() {
 		q.Set("since", since.UTC().Format(time.RFC3339))
@@ -172,6 +179,10 @@ func (c *Client) MetricHistoryStats(ctx context.Context) (history.Stats, error) 
 
 
 func (c *Client) MetricRollup(ctx context.Context, ref, metric string, since, until time.Time, bucket time.Duration) ([]history.RollupBucket, error) {
+	return c.MetricRollupFiltered(ctx, ref, metric, nil, since, until, bucket)
+}
+
+func (c *Client) MetricRollupFiltered(ctx context.Context, ref, metric string, attrs map[string]string, since, until time.Time, bucket time.Duration) ([]history.RollupBucket, error) {
 	var out []history.RollupBucket
 	if bucket <= 0 {
 		bucket = time.Minute
@@ -180,6 +191,9 @@ func (c *Client) MetricRollup(ctx context.Context, ref, metric string, since, un
 	q.Set("node", ref)
 	q.Set("metric", metric)
 	q.Set("bucket", bucket.String())
+	for k, v := range attrs {
+		q.Add("attr", k+"="+v)
+	}
 	if !since.IsZero() {
 		q.Set("since", since.UTC().Format(time.RFC3339))
 	}
