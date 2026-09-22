@@ -113,6 +113,14 @@ func Open(path, adminToken, bootstrapToken string) (*Store, error) {
 	if s.data.Alerts == nil {
 		s.data.Alerts = map[string]protocol.Alert{}
 	}
+	for id, node := range s.data.Nodes {
+		labels, groups, err := NormalizeNodeMetadata(node.Labels, node.Groups)
+		if err != nil {
+			return nil, fmt.Errorf("invalid persisted metadata for node %s: %w", id, err)
+		}
+		node.Labels = cloneLabels(labels)
+		node.Groups = append([]string(nil), groups...)
+	}
 	if s.data.MetricHighSince == nil {
 		s.data.MetricHighSince = map[string]time.Time{}
 	}
