@@ -64,6 +64,13 @@ func (c *Client) Summary(ctx context.Context) (protocol.Summary, error) {
 	return out, err
 }
 
+
+func (c *Client) SystemHealth(ctx context.Context) (protocol.SystemHealth, error) {
+	var out protocol.SystemHealth
+	err := c.request(ctx, http.MethodGet, "/api/v1/system/health", nil, http.StatusOK, &out)
+	return out, err
+}
+
 func (c *Client) Nodes(ctx context.Context) ([]protocol.NodeView, error) {
 	var out []protocol.NodeView
 	err := c.request(ctx, http.MethodGet, "/api/v1/nodes", nil, http.StatusOK, &out)
