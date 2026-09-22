@@ -45,11 +45,12 @@ type Point struct {
 }
 
 type Query struct {
-	NodeID string
-	Metric string
-	Since  time.Time
-	Until  time.Time
-	Limit  int
+	NodeID     string
+	Metric     string
+	Attributes map[string]string
+	Since      time.Time
+	Until      time.Time
+	Limit      int
 }
 
 type Stats struct {
@@ -192,6 +193,9 @@ func (s *Store) Query(q Query) ([]Point, error) {
 			}
 			for _, sample := range rec.Samples {
 				if q.Metric != "" && sample.Name != q.Metric {
+					continue
+				}
+				if !matchesAttributes(sample.Attributes, q.Attributes) {
 					continue
 				}
 				ts := sample.Timestamp.UTC()
@@ -385,6 +389,15 @@ func (s *Store) dataFilesLocked() ([]string, error) {
 		segments = append(segments, head)
 	}
 	return segments, nil
+}
+
+func matchesAttributes(actual, required map[string]string) bool {
+	for k, want := range required {
+		if actual[k] != want {
+			return false
+		}
+	}
+	return true
 }
 
 func scanRecords(path string, fn func(record) error) error {
