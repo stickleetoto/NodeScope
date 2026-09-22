@@ -560,6 +560,29 @@ func summarizeRollupBuckets(node, metric string, bucket time.Duration, buckets [
 		out["count"] = 0
 		return out
 	}
+	series := map[string]map[string]string{}
+	for _, b := range buckets {
+		keyBytes, _ := json.Marshal(b.Attributes)
+		key := string(keyBytes)
+		if _, ok := series[key]; !ok {
+			attrs := make(map[string]string, len(b.Attributes))
+			for k, v := range b.Attributes {
+				attrs[k] = v
+			}
+			series[key] = attrs
+		}
+	}
+	if len(series) > 1 {
+		values := make([]map[string]string, 0, len(series))
+		for _, attrs := range series {
+			values = append(values, attrs)
+		}
+		out["count"] = 0
+		out["series_count"] = len(series)
+		out["series"] = values
+		out["requires_attribute_filter"] = true
+		return out
+	}
 	first := buckets[0]
 	last := buckets[len(buckets)-1]
 	minBucket, maxBucket := first, first
@@ -661,6 +684,9 @@ func trendSchema() map[string]any {
 			"delta": map[string]any{"type": "number"},
 			"duration_seconds": map[string]any{"type": "number"},
 			"rate_per_hour": map[string]any{"type": "number"},
+			"series_count": map[string]any{"type": "integer"},
+			"series": map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"requires_attribute_filter": map[string]any{"type": "boolean"},
 		},
 		"required": []string{"node", "metric", "count"},
 	}
