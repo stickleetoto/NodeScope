@@ -27,7 +27,7 @@ const (
 	maxEvents            = 5000
 	maxIncidents         = 2000
 	maxNodes             = 4096
-	CurrentSchemaVersion = 1
+	CurrentSchemaVersion = 2
 )
 
 type AlertPolicy struct {
@@ -85,17 +85,19 @@ func Open(path, adminToken, bootstrapToken string) (*Store, error) {
 		if s.data.SchemaVersion > CurrentSchemaVersion {
 			return nil, fmt.Errorf("state schema %d is newer than supported schema %d", s.data.SchemaVersion, CurrentSchemaVersion)
 		}
-		if s.data.SchemaVersion == 0 {
-			// v0.6 and earlier had no explicit schema or persisted policy.
-			// Keep a one-time pre-migration backup containing credentials as 0600.
-			backup := path + ".schema0.bak"
+		if s.data.SchemaVersion < CurrentSchemaVersion {
+			previousSchema := s.data.SchemaVersion
+			backup := fmt.Sprintf("%s.schema%d.bak", path, previousSchema)
 			if _, statErr := os.Stat(backup); errors.Is(statErr, os.ErrNotExist) {
 				if err := atomicfile.WriteFile(backup, b, 0o600); err != nil {
-					return nil, fmt.Errorf("backup legacy state: %w", err)
+					return nil, fmt.Errorf("backup schema %d state: %w", previousSchema, err)
 				}
 			}
+			if previousSchema == 0 {
+				// v0.6 and earlier had no explicit schema or persisted policy.
+				s.data.Policy = DefaultAlertPolicy()
+			}
 			s.data.SchemaVersion = CurrentSchemaVersion
-			s.data.Policy = DefaultAlertPolicy()
 		}
 	case errors.Is(err, os.ErrNotExist):
 		s.created = true
