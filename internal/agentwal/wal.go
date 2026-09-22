@@ -101,11 +101,14 @@ func (w *WAL) Enqueue(samples []protocol.TelemetrySample) (protocol.TelemetryBat
 		return protocol.TelemetryBatch{}, fmt.Errorf("single telemetry batch exceeds WAL capacity")
 	}
 
+	oldRecords := append([]protocol.TelemetryBatch(nil), w.records...)
+	oldNext, oldDropped := w.next, w.dropped
 	w.records = append(w.records, batch)
 	w.next = batch.Sequence
 	for {
 		size, err := encodedSize(w.records)
 		if err != nil {
+			w.records, w.next, w.dropped = oldRecords, oldNext, oldDropped
 			return protocol.TelemetryBatch{}, err
 		}
 		if size <= w.max || len(w.records) <= 1 {
@@ -115,6 +118,7 @@ func (w *WAL) Enqueue(samples []protocol.TelemetrySample) (protocol.TelemetryBat
 		w.dropped++
 	}
 	if err := w.rewriteLocked(); err != nil {
+		w.records, w.next, w.dropped = oldRecords, oldNext, oldDropped
 		return protocol.TelemetryBatch{}, err
 	}
 	return batch, nil
