@@ -362,8 +362,9 @@ func (s *Store) pruneLocked() error {
 	type fileInfo struct {
 		name string
 		size int64
+		mod  time.Time
 	}
-	var segments []fileInfo
+	var candidates []fileInfo
 	var total int64
 	for _, e := range entries {
 		if e.IsDir() {
@@ -373,24 +374,31 @@ func (s *Store) pruneLocked() error {
 		if err != nil {
 			return err
 		}
-		if e.Name() == "head.jsonl" {
+		switch {
+		case e.Name() == "head.jsonl":
 			total += info.Size()
-			continue
-		}
-		if strings.HasPrefix(e.Name(), "segment-") && strings.HasSuffix(e.Name(), ".jsonl") {
-			segments = append(segments, fileInfo{name: e.Name(), size: info.Size()})
+		case strings.HasPrefix(e.Name(), "segment-") && strings.HasSuffix(e.Name(), ".jsonl"):
+			candidates = append(candidates, fileInfo{name: e.Name(), size: info.Size(), mod: info.ModTime().UTC()})
+			total += info.Size()
+		case strings.HasPrefix(e.Name(), "rollup-1m-") && strings.HasSuffix(e.Name(), ".json"):
+			candidates = append(candidates, fileInfo{name: e.Name(), size: info.Size(), mod: info.ModTime().UTC()})
 			total += info.Size()
 		}
 	}
-	sort.Slice(segments, func(i, j int) bool { return segments[i].name < segments[j].name })
-	for _, seg := range segments {
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].mod.Equal(candidates[j].mod) {
+			return candidates[i].name < candidates[j].name
+		}
+		return candidates[i].mod.Before(candidates[j].mod)
+	})
+	for _, candidate := range candidates {
 		if total <= s.opts.MaxTotalBytes {
 			break
 		}
-		if err := os.Remove(filepath.Join(s.dir, seg.name)); err != nil && !os.IsNotExist(err) {
+		if err := os.Remove(filepath.Join(s.dir, candidate.name)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
-		total -= seg.size
+		total -= candidate.size
 	}
 	return nil
 }
