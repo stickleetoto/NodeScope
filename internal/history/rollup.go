@@ -24,6 +24,7 @@ type RollupBucket struct {
 	Min        float64           `json:"min"`
 	Max        float64           `json:"max"`
 	Average    float64           `json:"average"`
+	First      float64           `json:"first"`
 	Last       float64           `json:"last"`
 }
 
@@ -75,7 +76,7 @@ func (s *Store) Rollup(q Query, bucket time.Duration) ([]RollupBucket, error) {
 					a = &rollupAcc{RollupBucket: RollupBucket{
 						NodeID: rec.NodeID, Metric: sample.Name, Attributes: attrs,
 						Unit: sample.Unit, Kind: sample.Kind, Start: start, End: start.Add(bucket),
-						Count: 1, Min: sample.Value, Max: sample.Value, Last: sample.Value,
+						Count: 1, Min: sample.Value, Max: sample.Value, First: sample.Value, Last: sample.Value,
 					}, sum: sample.Value, key: series}
 					accs[key] = a
 				} else {
