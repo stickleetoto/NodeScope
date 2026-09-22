@@ -123,6 +123,7 @@ Usage:
   nodescope mcp [--server URL] [--token TOKEN] [--allow-write]
   nodescope metrics history <node> <metric> [--since 1h] [--limit 500] [--json]
   nodescope metrics trend <node> <metric> [--since 1h] [--limit 500] [--json]
+  nodescope metrics rollup <node> <metric> [--since 24h] [--bucket 1m] [--json]
   nodescope metrics stats [--json]
   nodescope token show [--kind all|join|read|admin] [--data PATH]
   nodescope token rotate <join|read|admin> [--server URL] [--admin-token TOKEN]
@@ -418,6 +419,8 @@ func cmdMetrics(args []string) error {
 		return cmdMetricHistory(args[1:], false)
 	case "trend":
 		return cmdMetricHistory(args[1:], true)
+	case "rollup":
+		return cmdMetricRollup(args[1:])
 	case "stats":
 		return cmdMetricStats(args[1:])
 	default:
@@ -491,6 +494,51 @@ func cmdMetricHistory(args []string, trend bool) error {
 	fmt.Printf("delta:   %g %s\n", out["delta"], out["unit"])
 	if rate, ok := out["rate_per_hour"]; ok {
 		fmt.Printf("rate/h:  %g %s/h\n", rate, out["unit"])
+	}
+	return nil
+}
+
+func cmdMetricRollup(args []string) error {
+	fs := flag.NewFlagSet("metrics rollup", flag.ContinueOnError)
+	since := fs.Duration("since", 24*time.Hour, "lookback duration")
+	bucket := fs.Duration("bucket", time.Minute, "rollup bucket")
+	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
+	serverURL := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
+	token := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")), "read/admin API token")
+	args = reorderKnownFlags(args, map[string]bool{"--since": true, "--bucket": true, "--json": false, "--server": true, "--token": true})
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 2 {
+		return fmt.Errorf("usage: nodescope metrics rollup <node> <metric> [--since 24h] [--bucket 1m] [--json]")
+	}
+	if *since <= 0 {
+		return fmt.Errorf("--since must be greater than zero")
+	}
+	if *bucket < time.Second || *bucket > 24*time.Hour {
+		return fmt.Errorf("--bucket must be between 1s and 24h")
+	}
+	if strings.TrimSpace(*token) == "" {
+		return fmt.Errorf("read token required: set NODESCOPE_API_TOKEN or pass --token")
+	}
+	api, err := apiclient.New(*serverURL, *token)
+	if err != nil {
+		return err
+	}
+	out, err := api.MetricRollup(context.Background(), fs.Arg(0), fs.Arg(1), time.Now().UTC().Add(-*since), time.Time{}, *bucket)
+	if err != nil {
+		return err
+	}
+	if *jsonOut {
+		return writePrettyJSON(out)
+	}
+	if len(out) == 0 {
+		fmt.Println("no rollup buckets")
+		return nil
+	}
+	for _, b := range out {
+		fmt.Printf("%s  count=%d min=%g max=%g avg=%g last=%g %s\n",
+			b.Start.Local().Format("2006-01-02 15:04:05"), b.Count, b.Min, b.Max, b.Average, b.Last, b.Unit)
 	}
 	return nil
 }
