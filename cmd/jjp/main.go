@@ -506,6 +506,9 @@ func cmdMetricHistory(args []string, trend bool) error {
 		if *jsonOut {
 			return writePrettyJSON(out)
 		}
+		if required, _ := out["requires_attribute_filter"].(bool); required {
+			return fmt.Errorf("metric resolves to multiple series; repeat --attr key=value to select one series")
+		}
 		fmt.Printf("%s / %s  bucket=%s\n", fs.Arg(0), fs.Arg(1), bucket)
 		fmt.Printf("samples: %v\n", out["count"])
 		if len(buckets) == 0 {
@@ -555,6 +558,29 @@ func summarizeRollupHistory(buckets []history.RollupBucket, node, metric string,
 	out := map[string]any{"node": node, "metric": metric, "bucket": bucket.String(), "bucket_count": len(buckets)}
 	if len(buckets) == 0 {
 		out["count"] = 0
+		return out
+	}
+	series := map[string]map[string]string{}
+	for _, b := range buckets {
+		keyBytes, _ := json.Marshal(b.Attributes)
+		key := string(keyBytes)
+		if _, ok := series[key]; !ok {
+			attrs := make(map[string]string, len(b.Attributes))
+			for k, v := range b.Attributes {
+				attrs[k] = v
+			}
+			series[key] = attrs
+		}
+	}
+	if len(series) > 1 {
+		values := make([]map[string]string, 0, len(series))
+		for _, attrs := range series {
+			values = append(values, attrs)
+		}
+		out["count"] = 0
+		out["series_count"] = len(series)
+		out["series"] = values
+		out["requires_attribute_filter"] = true
 		return out
 	}
 	first := buckets[0]
@@ -638,8 +664,8 @@ func cmdMetricRollup(args []string) error {
 		return nil
 	}
 	for _, b := range out {
-		fmt.Printf("%s  count=%d min=%g max=%g avg=%g last=%g %s\n",
-			b.Start.Local().Format("2006-01-02 15:04:05"), b.Count, b.Min, b.Max, b.Average, b.Last, b.Unit)
+		fmt.Printf("%s  count=%d min=%g max=%g avg=%g last=%g %s%s\n",
+			b.Start.Local().Format("2006-01-02 15:04:05"), b.Count, b.Min, b.Max, b.Average, b.Last, b.Unit, formatAttrs(b.Attributes))
 	}
 	return nil
 }
@@ -710,6 +736,22 @@ func summarizeHistory(points []history.Point, node, metric string) map[string]an
 		out["rate_per_hour"] = (last.Value - first.Value) / duration.Hours()
 	}
 	return out
+}
+
+func formatAttrs(attrs map[string]string) string {
+	if len(attrs) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(attrs))
+	for k := range attrs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var parts []string
+	for _, k := range keys {
+		parts = append(parts, k+"="+attrs[k])
+	}
+	return " [" + strings.Join(parts, ",") + "]"
 }
 
 func writePrettyJSON(v any) error {
