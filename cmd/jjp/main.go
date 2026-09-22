@@ -414,14 +414,14 @@ func runAgentLoop(c agent.Config, interval time.Duration) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	fmt.Printf("Sending heartbeat to %s every %s. Ctrl+C to stop.\n", c.Server, interval)
-	lastFailed := false
+	hadIssue := false
 	err := agent.Run(ctx, c, interval, func(_ protocol.Metrics, _ []protocol.ServiceStatus, e error) {
 		if e != nil {
-			fmt.Printf("[%s] heartbeat failed: %v (retrying)\n", time.Now().Format("15:04:05"), e)
-			lastFailed = true
-		} else if lastFailed {
-			fmt.Printf("[%s] connection restored\n", time.Now().Format("15:04:05"))
-			lastFailed = false
+			fmt.Printf("[%s] agent cycle issue: %v\n", time.Now().Format("15:04:05"), e)
+			hadIssue = true
+		} else if hadIssue {
+			fmt.Printf("[%s] agent cycle healthy\n", time.Now().Format("15:04:05"))
+			hadIssue = false
 		}
 	})
 	if errors.Is(err, context.Canceled) {
