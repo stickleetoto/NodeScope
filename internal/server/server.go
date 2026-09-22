@@ -43,6 +43,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]string{"status": "ok", "version": protocol.Version})
 	})
+	mux.HandleFunc("GET /metrics", s.prometheusMetrics)
 	mux.HandleFunc("GET /api/v1/info", s.info)
 	mux.HandleFunc("POST /api/v1/tokens/{kind}/rotate", s.rotateToken)
 	mux.HandleFunc("POST /api/v1/join", s.join)
