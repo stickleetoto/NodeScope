@@ -26,6 +26,10 @@ type Stats struct {
 	NextSequence   uint64 `json:"next_sequence"`
 }
 
+type walMeta struct {
+	LastSequence uint64 `json:"last_sequence"`
+}
+
 type WAL struct {
 	mu      sync.Mutex
 	path    string
@@ -46,37 +50,43 @@ func Open(path string, maxBytes int64) (*WAL, error) {
 		return nil, err
 	}
 	w := &WAL{path: path, max: maxBytes}
-	b, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return w, nil
-	}
-	if err != nil {
+	if err := w.loadMeta(); err != nil {
 		return nil, err
 	}
-	lines := strings.Split(string(b), "\n")
-	for i, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var batch protocol.TelemetryBatch
-		if err := json.Unmarshal([]byte(line), &batch); err != nil {
-			// A crash can leave only the final append incomplete. Preserve all
-			// earlier durable records and rewrite the queue without that tail.
-			if i == len(lines)-1 || i == len(lines)-2 {
-				break
+
+	b, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	if err == nil {
+		lines := strings.Split(string(b), "\n")
+		for i, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
 			}
-			return nil, fmt.Errorf("decode telemetry WAL: %w", err)
-		}
-		if batch.Sequence == 0 || len(batch.Samples) == 0 {
-			continue
-		}
-		w.records = append(w.records, batch)
-		if batch.Sequence > w.next {
-			w.next = batch.Sequence
+			var batch protocol.TelemetryBatch
+			if err := json.Unmarshal([]byte(line), &batch); err != nil {
+				// A crash can leave only the final append incomplete. Preserve all
+				// earlier durable records and rewrite the queue without that tail.
+				if i == len(lines)-1 || i == len(lines)-2 {
+					break
+				}
+				return nil, fmt.Errorf("decode telemetry WAL: %w", err)
+			}
+			if batch.Sequence == 0 || len(batch.Samples) == 0 {
+				continue
+			}
+			w.records = append(w.records, batch)
+			if batch.Sequence > w.next {
+				w.next = batch.Sequence
+			}
 		}
 	}
 	if err := w.rewriteLocked(); err != nil {
+		return nil, err
+	}
+	if err := w.persistMetaLocked(); err != nil {
 		return nil, err
 	}
 	return w, nil
@@ -103,12 +113,21 @@ func (w *WAL) Enqueue(samples []protocol.TelemetrySample) (protocol.TelemetryBat
 
 	oldRecords := append([]protocol.TelemetryBatch(nil), w.records...)
 	oldNext, oldDropped := w.next, w.dropped
-	w.records = append(w.records, batch)
+
+	// Persist the sequence reservation before the queue record. A crash or queue
+	// write failure may create a harmless sequence gap, but can never cause
+	// sequence reuse after all pending records have been ACKed.
 	w.next = batch.Sequence
+	if err := w.persistMetaLocked(); err != nil {
+		w.next = oldNext
+		return protocol.TelemetryBatch{}, err
+	}
+
+	w.records = append(w.records, batch)
 	for {
 		size, err := encodedSize(w.records)
 		if err != nil {
-			w.records, w.next, w.dropped = oldRecords, oldNext, oldDropped
+			w.records, w.dropped = oldRecords, oldDropped
 			return protocol.TelemetryBatch{}, err
 		}
 		if size <= w.max || len(w.records) <= 1 {
@@ -118,7 +137,7 @@ func (w *WAL) Enqueue(samples []protocol.TelemetrySample) (protocol.TelemetryBat
 		w.dropped++
 	}
 	if err := w.rewriteLocked(); err != nil {
-		w.records, w.next, w.dropped = oldRecords, oldNext, oldDropped
+		w.records, w.dropped = oldRecords, oldDropped
 		return protocol.TelemetryBatch{}, err
 	}
 	return batch, nil
@@ -149,8 +168,13 @@ func (w *WAL) Ack(sequence uint64) error {
 	if idx == 0 {
 		return nil
 	}
+	oldRecords := append([]protocol.TelemetryBatch(nil), w.records...)
 	w.records = append([]protocol.TelemetryBatch(nil), w.records[idx:]...)
-	return w.rewriteLocked()
+	if err := w.rewriteLocked(); err != nil {
+		w.records = oldRecords
+		return err
+	}
+	return nil
 }
 
 func (w *WAL) Stats() (Stats, error) {
@@ -172,6 +196,34 @@ func (w *WAL) Stats() (Stats, error) {
 		DroppedBatches: w.dropped,
 		NextSequence:   w.next + 1,
 	}, nil
+}
+
+func (w *WAL) metaPath() string {
+	return w.path + ".meta.json"
+}
+
+func (w *WAL) loadMeta() error {
+	b, err := os.ReadFile(w.metaPath())
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var meta walMeta
+	if err := json.Unmarshal(b, &meta); err != nil {
+		return fmt.Errorf("decode telemetry WAL metadata: %w", err)
+	}
+	w.next = meta.LastSequence
+	return nil
+}
+
+func (w *WAL) persistMetaLocked() error {
+	b, err := json.Marshal(walMeta{LastSequence: w.next})
+	if err != nil {
+		return err
+	}
+	return atomicfile.WriteFile(w.metaPath(), b, 0o600)
 }
 
 func (w *WAL) rewriteLocked() error {
