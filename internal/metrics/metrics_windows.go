@@ -15,7 +15,7 @@ import (
 
 type winMetrics struct{ CPU, RAMUsed, RAMTotal, DiskUsed, DiskTotal, Uptime float64 }
 
-func Collect() (protocol.Metrics, error) {
+func collectLegacy() (protocol.Metrics, error) {
 	ps := `$os=Get-CimInstance Win32_OperatingSystem;$cpu=(Get-CimInstance Win32_Processor|Measure-Object LoadPercentage -Average).Average;$d=Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'";[pscustomobject]@{CPU=[double]$cpu;RAMUsed=[double](($os.TotalVisibleMemorySize-$os.FreePhysicalMemory)*1024);RAMTotal=[double]($os.TotalVisibleMemorySize*1024);DiskUsed=[double]($d.Size-$d.FreeSpace);DiskTotal=[double]$d.Size;Uptime=[double]((Get-Date)-$os.LastBootUpTime).TotalSeconds}|ConvertTo-Json -Compress`
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
