@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jjp-monitor/jjp/internal/atomicfile"
 	"github.com/jjp-monitor/jjp/internal/protocol"
@@ -14,6 +15,7 @@ import (
 
 const (
 	DefaultMaxBytes = 16 << 20
+	DefaultMaxAge   = 6 * time.Hour
 	maxBatchSamples = 4096
 )
 
@@ -22,8 +24,10 @@ type Stats struct {
 	PendingSamples int    `json:"pending_samples"`
 	Bytes          int64  `json:"bytes"`
 	MaxBytes       int64  `json:"max_bytes"`
-	DroppedBatches uint64 `json:"dropped_batches"`
-	NextSequence   uint64 `json:"next_sequence"`
+	DroppedBatches       uint64 `json:"dropped_batches"`
+	NextSequence         uint64 `json:"next_sequence"`
+	MaxAgeSeconds        int64  `json:"max_age_seconds"`
+	OldestRecordAgeSec   int64  `json:"oldest_record_age_seconds"`
 }
 
 type walMeta struct {
@@ -34,22 +38,26 @@ type WAL struct {
 	mu      sync.Mutex
 	path    string
 	max     int64
+	maxAge  time.Duration
 	records []protocol.TelemetryBatch
 	next    uint64
 	dropped uint64
 }
 
-func Open(path string, maxBytes int64) (*WAL, error) {
+func Open(path string, maxBytes int64, maxAge time.Duration) (*WAL, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("telemetry WAL path is required")
 	}
 	if maxBytes <= 0 {
 		maxBytes = DefaultMaxBytes
 	}
+	if maxAge <= 0 {
+		maxAge = DefaultMaxAge
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	w := &WAL{path: path, max: maxBytes}
+	w := &WAL{path: path, max: maxBytes, maxAge: maxAge}
 	if err := w.loadMeta(); err != nil {
 		return nil, err
 	}
@@ -83,6 +91,7 @@ func Open(path string, maxBytes int64) (*WAL, error) {
 			}
 		}
 	}
+	w.pruneExpiredLocked(time.Now().UTC())
 	if err := w.rewriteLocked(); err != nil {
 		return nil, err
 	}
@@ -124,6 +133,7 @@ func (w *WAL) Enqueue(samples []protocol.TelemetrySample) (protocol.TelemetryBat
 	}
 
 	w.records = append(w.records, batch)
+	w.pruneExpiredLocked(time.Now().UTC())
 	for {
 		size, err := encodedSize(w.records)
 		if err != nil {
@@ -188,14 +198,55 @@ func (w *WAL) Stats() (Stats, error) {
 	for _, batch := range w.records {
 		samples += len(batch.Samples)
 	}
+	oldestAge := int64(0)
+	if len(w.records) > 0 {
+		if ts := batchNewestTimestamp(w.records[0]); !ts.IsZero() {
+			age := time.Since(ts)
+			if age > 0 {
+				oldestAge = int64(age.Seconds())
+			}
+		}
+	}
 	return Stats{
-		PendingBatches: len(w.records),
-		PendingSamples: samples,
-		Bytes:          size,
-		MaxBytes:       w.max,
-		DroppedBatches: w.dropped,
-		NextSequence:   w.next + 1,
+		PendingBatches:     len(w.records),
+		PendingSamples:     samples,
+		Bytes:              size,
+		MaxBytes:           w.max,
+		DroppedBatches:     w.dropped,
+		NextSequence:       w.next + 1,
+		MaxAgeSeconds:      int64(w.maxAge.Seconds()),
+		OldestRecordAgeSec: oldestAge,
 	}, nil
+}
+
+func (w *WAL) pruneExpiredLocked(now time.Time) {
+	if w.maxAge <= 0 || len(w.records) == 0 {
+		return
+	}
+	cutoff := now.Add(-w.maxAge)
+	idx := 0
+	for idx < len(w.records) {
+		ts := batchNewestTimestamp(w.records[idx])
+		if ts.IsZero() || !ts.Before(cutoff) {
+			break
+		}
+		idx++
+	}
+	if idx > 0 {
+		w.records = append([]protocol.TelemetryBatch(nil), w.records[idx:]...)
+		w.dropped += uint64(idx)
+	}
+}
+
+func batchNewestTimestamp(batch protocol.TelemetryBatch) time.Time {
+	var newest time.Time
+	for _, sample := range batch.Samples {
+		ts := sample.Timestamp.UTC()
+		if ts.After(newest) {
+			newest = ts
+		}
+	}
+	return newest
 }
 
 func (w *WAL) metaPath() string {
