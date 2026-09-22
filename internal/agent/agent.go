@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jjp-monitor/jjp/internal/agentwal"
 	"github.com/jjp-monitor/jjp/internal/metrics"
 	"github.com/jjp-monitor/jjp/internal/protocol"
 	"github.com/jjp-monitor/jjp/internal/servicecheck"
@@ -61,27 +62,54 @@ func Join(serverURL, token, name string) (Config, error) {
 	return Config{Server: serverURL, NodeID: jr.NodeID, Secret: jr.Secret, Name: name}, nil
 }
 
-// Run continuously reports metrics and service health. Network failures do not
-// terminate the agent; failed heartbeats are retried with exponential backoff.
+// Run continuously reports liveness/current state and separately queues richer
+// telemetry. Telemetry survives transient central outages in a bounded local WAL.
 func Run(ctx context.Context, c Config, interval time.Duration, onBeat func(protocol.Metrics, []protocol.ServiceStatus, error)) error {
 	if interval < time.Second {
 		interval = time.Second
 	}
+	walPath, err := DefaultTelemetryWALPath()
+	if err != nil {
+		return err
+	}
+	telemetryWAL, err := agentwal.Open(walPath, agentwal.DefaultMaxBytes)
+	if err != nil {
+		return fmt.Errorf("open telemetry WAL: %w", err)
+	}
+
 	backoff := time.Second
 	const maxBackoff = 30 * time.Second
 
 	for {
-		m, err := metrics.Collect()
+		m, cycleErr := metrics.Collect()
 		services := servicecheck.CheckAll(ctx, c.Services)
-		if err == nil {
-			err = sendHeartbeat(ctx, c, m, services)
+
+		if cycleErr == nil {
+			samples, _ := metrics.CollectSamplesFromLegacy(ctx, m)
+			if len(samples) > 0 {
+				if _, err := telemetryWAL.Enqueue(metrics.ToProtocolSamples(samples)); err != nil {
+					cycleErr = fmt.Errorf("queue telemetry: %w", err)
+				}
+			}
 		}
+		if cycleErr == nil {
+			if err := sendHeartbeat(ctx, c, m, services); err != nil {
+				cycleErr = err
+			}
+		}
+
+		// Flush pending telemetry even when the current metric collection failed:
+		// this lets older durable batches drain as soon as connectivity returns.
+		if err := flushTelemetry(ctx, c, telemetryWAL); err != nil && cycleErr == nil {
+			cycleErr = err
+		}
+
 		if onBeat != nil {
-			onBeat(m, services, err)
+			onBeat(m, services, cycleErr)
 		}
 
 		delay := interval
-		if err != nil {
+		if cycleErr != nil {
 			delay = backoff
 			backoff *= 2
 			if backoff > maxBackoff {
@@ -101,6 +129,49 @@ func Run(ctx context.Context, c Config, interval time.Duration, onBeat func(prot
 		case <-t.C:
 		}
 	}
+}
+
+func flushTelemetry(ctx context.Context, c Config, wal *agentwal.WAL) error {
+	for _, batch := range wal.Pending(8) {
+		ack, err := sendTelemetry(ctx, c, batch)
+		if err != nil {
+			return err
+		}
+		if ack.DurableSequence < batch.Sequence {
+			return fmt.Errorf("telemetry ACK %d is behind batch %d", ack.DurableSequence, batch.Sequence)
+		}
+		if err := wal.Ack(ack.DurableSequence); err != nil {
+			return fmt.Errorf("advance telemetry WAL: %w", err)
+		}
+	}
+	return nil
+}
+
+func sendTelemetry(ctx context.Context, c Config, batch protocol.TelemetryBatch) (protocol.TelemetryAck, error) {
+	payload, err := json.Marshal(batch)
+	if err != nil {
+		return protocol.TelemetryAck{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.Server+"/api/v1/telemetry", bytes.NewReader(payload))
+	if err != nil {
+		return protocol.TelemetryAck{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.Secret)
+	req.Header.Set("X-JJP-Node-ID", c.NodeID)
+	resp, err := HTTPClient.Do(req)
+	if err != nil {
+		return protocol.TelemetryAck{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return protocol.TelemetryAck{}, fmt.Errorf("telemetry upload failed: %s", resp.Status)
+	}
+	var ack protocol.TelemetryAck
+	if err := json.NewDecoder(resp.Body).Decode(&ack); err != nil {
+		return protocol.TelemetryAck{}, fmt.Errorf("decode telemetry ACK: %w", err)
+	}
+	return ack, nil
 }
 
 func sendHeartbeat(ctx context.Context, c Config, m protocol.Metrics, services []protocol.ServiceStatus) error {
