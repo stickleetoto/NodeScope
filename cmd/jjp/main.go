@@ -126,6 +126,7 @@ Usage:
   nodescope metrics trend <node> <metric> [--attr key=value] [--since 1h] [--limit 500] [--json]
   nodescope metrics rollup <node> <metric> [--attr key=value] [--since 24h] [--bucket 1m] [--json]
   nodescope metrics stats [--json]
+  nodescope metrics system [--json]
   nodescope token show [--kind all|join|read|admin] [--data PATH]
   nodescope token rotate <join|read|admin> [--server URL] [--admin-token TOKEN]
   nodescope state check [--data PATH] [--json]
@@ -461,7 +462,7 @@ func parseCLIAttrs(values []string) (map[string]string, error) {
 
 func cmdMetrics(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: nodescope metrics <history|trend|rollup|stats>")
+		return fmt.Errorf("usage: nodescope metrics <history|trend|rollup|stats|system>")
 	}
 	switch args[0] {
 	case "history":
@@ -472,6 +473,8 @@ func cmdMetrics(args []string) error {
 		return cmdMetricRollup(args[1:])
 	case "stats":
 		return cmdMetricStats(args[1:])
+	case "system":
+		return cmdMetricSystem(args[1:])
 	default:
 		return fmt.Errorf("unknown metrics command %q", args[0])
 	}
@@ -686,6 +689,42 @@ func cmdMetricRollup(args []string) error {
 		fmt.Printf("%s  count=%d min=%g max=%g avg=%g last=%g %s%s\n",
 			b.Start.Local().Format("2006-01-02 15:04:05"), b.Count, b.Min, b.Max, b.Average, b.Last, b.Unit, formatAttrs(b.Attributes))
 	}
+	return nil
+}
+
+func cmdMetricSystem(args []string) error {
+	fs := flag.NewFlagSet("metrics system", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
+	serverURL := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
+	token := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")), "read/admin API token")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("usage: nodescope metrics system [--json]")
+	}
+	if strings.TrimSpace(*token) == "" {
+		return fmt.Errorf("read token required: set NODESCOPE_API_TOKEN or pass --token")
+	}
+	api, err := apiclient.New(*serverURL, *token)
+	if err != nil {
+		return err
+	}
+	health, err := api.SystemHealth(context.Background())
+	if err != nil {
+		return err
+	}
+	if *jsonOut {
+		return writePrettyJSON(health)
+	}
+	fmt.Printf("uptime:           %s\n", fmtDuration(health.UptimeSeconds))
+	fmt.Printf("requests:         %d  4xx=%d  5xx=%d\n", health.RequestsTotal, health.ClientErrorsTotal, health.ServerErrorsTotal)
+	fmt.Printf("request latency:  avg=%.2fms max=%.2fms\n", health.RequestAverageMS, health.RequestMaxMS)
+	fmt.Printf("heartbeats:       %d\n", health.HeartbeatsTotal)
+	fmt.Printf("telemetry:        %d batches / %d samples\n", health.TelemetryBatchesTotal, health.TelemetrySamplesTotal)
+	fmt.Printf("nodes:            %d total / %d online\n", health.NodesTotal, health.NodesOnline)
+	fmt.Printf("history:          %s / %s\n", bytesText(uint64(health.HistoryBytes)), bytesText(uint64(health.HistoryMaxBytes)))
+	fmt.Printf("history files:    %d raw segments / %d rollups (%s)\n", health.HistoryRawSegments, health.HistoryRollupFiles, bytesText(uint64(health.HistoryRollupBytes)))
 	return nil
 }
 
