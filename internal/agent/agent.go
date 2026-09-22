@@ -72,7 +72,7 @@ func Run(ctx context.Context, c Config, interval time.Duration, onBeat func(prot
 	if err != nil {
 		return err
 	}
-	telemetryWAL, err := agentwal.Open(walPath, agentwal.DefaultMaxBytes)
+	telemetryWAL, err := agentwal.Open(walPath, agentwal.DefaultMaxBytes, agentwal.DefaultMaxAge)
 	if err != nil {
 		return fmt.Errorf("open telemetry WAL: %w", err)
 	}
@@ -167,6 +167,8 @@ func walTelemetrySamples(stats agentwal.Stats) []protocol.TelemetrySample {
 		{Name: "nodescope.agent.wal.bytes", Value: float64(stats.Bytes), Unit: "By", Kind: "gauge", Timestamp: now, Collector: "nodescope"},
 		{Name: "nodescope.agent.wal.utilization", Value: utilization, Unit: "1", Kind: "gauge", Timestamp: now, Collector: "nodescope"},
 		{Name: "nodescope.agent.wal.dropped_batches", Value: float64(stats.DroppedBatches), Unit: "{batch}", Kind: "counter", Timestamp: now, Collector: "nodescope"},
+		{Name: "nodescope.agent.wal.oldest_record_age", Value: float64(stats.OldestRecordAgeSec), Unit: "s", Kind: "gauge", Timestamp: now, Collector: "nodescope"},
+		{Name: "nodescope.agent.wal.max_age", Value: float64(stats.MaxAgeSeconds), Unit: "s", Kind: "gauge", Timestamp: now, Collector: "nodescope"},
 	}
 }
 
