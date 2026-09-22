@@ -171,7 +171,9 @@ func (hostCollector) Collect(ctx context.Context) ([]Sample, error) {
 }
 
 func DefaultRegistry() *Registry {
-	r, err := NewRegistry(hostCollector{})
+	collectors := []Collector{hostCollector{}}
+	collectors = append(collectors, platformCollectors()...)
+	r, err := NewRegistry(collectors...)
 	if err != nil {
 		panic(err)
 	}
