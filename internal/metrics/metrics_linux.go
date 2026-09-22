@@ -14,7 +14,7 @@ import (
 	"github.com/jjp-monitor/jjp/internal/protocol"
 )
 
-func Collect() (protocol.Metrics, error) {
+func collectLegacy() (protocol.Metrics, error) {
 	cpu, err := cpuPercent()
 	if err != nil {
 		return protocol.Metrics{}, err
