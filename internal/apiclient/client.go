@@ -72,8 +72,23 @@ func (c *Client) SystemHealth(ctx context.Context) (protocol.SystemHealth, error
 }
 
 func (c *Client) Nodes(ctx context.Context) ([]protocol.NodeView, error) {
+	return c.NodesFiltered(ctx, nil, nil)
+}
+
+func (c *Client) NodesFiltered(ctx context.Context, labels map[string]string, groups []string) ([]protocol.NodeView, error) {
 	var out []protocol.NodeView
-	err := c.request(ctx, http.MethodGet, "/api/v1/nodes", nil, http.StatusOK, &out)
+	q := url.Values{}
+	for key, value := range labels {
+		q.Add("label", key+"="+value)
+	}
+	for _, group := range groups {
+		q.Add("group", group)
+	}
+	path := "/api/v1/nodes"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	err := c.request(ctx, http.MethodGet, path, nil, http.StatusOK, &out)
 	return out, err
 }
 
@@ -225,6 +240,12 @@ func (c *Client) Services(ctx context.Context, ref string) ([]protocol.ServiceSt
 
 func (c *Client) Rename(ctx context.Context, ref, name string) error {
 	return c.request(ctx, http.MethodPatch, "/api/v1/nodes/"+url.PathEscape(ref), protocol.RenameNodeRequest{Name: name}, http.StatusNoContent, nil)
+}
+
+
+func (c *Client) UpdateNodeMetadata(ctx context.Context, ref string, labels map[string]string, groups []string) error {
+	req := protocol.NodeMetadataRequest{Labels: labels, Groups: groups}
+	return c.request(ctx, http.MethodPatch, "/api/v1/nodes/"+url.PathEscape(ref)+"/metadata", req, http.StatusNoContent, nil)
 }
 
 func (c *Client) Remove(ctx context.Context, ref string) error {
