@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.2.0-dev - Telemetry Foundation
+
+### Added
+- Added Metric Model v2 with typed gauge/counter samples, units, timestamps, bounded attributes, and collector identity.
+- Added collector registry and richer Linux collectors for load, swap, network, filesystems, disk I/O, process states, and PSI pressure.
+- Added Windows v2 collectors for process count, pagefile pressure, and fixed logical disks.
+- Added a bounded agent telemetry WAL with durable sequence numbers, reconnect replay, ACK-driven truncation, and self-observability.
+- Added a separate telemetry ingest path and append-only central history store.
+- Added bounded raw history, persistent 1-minute rollups, 6-hour raw retention, and 90-day rollup retention subject to the global history size cap.
+- Added metric history, rollup, trend, and storage/system-health CLI commands.
+- Added MCP tools for raw metric history, deterministic metric trends/peaks, and NodeScope system health.
+- Added exact metric-series attribute filters so interface/device/mount series are never silently merged.
+- Added central self-observability for request/error counts, latency, heartbeat and telemetry ingest counts, fleet state, and history storage.
+
+### Changed
+- NodeScope now separates low-rate heartbeat/current-state data from richer telemetry batches.
+- Long-window trend queries use adaptive rollups instead of truncating to the newest raw samples.
+- History compaction uses telemetry timestamps rather than file modification time so low-volume nodes still respect raw retention.
+
+### Compatibility
+- HTTP API remains v1.
+- Existing v1 heartbeat payloads and current-state storage remain compatible.
+- Legacy JJP state paths and compatibility headers remain unchanged during the rename transition.
+
+### Verification
+- Implementation is being developed without running tests/builds in this pass; validation is intentionally deferred.
+
+
 ## Unreleased - NodeScope rename
 
 ### Changed
