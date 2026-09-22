@@ -92,8 +92,7 @@ func (filesystemCollector) Collect(ctx context.Context) ([]Sample, error) {
 }
 
 func unescapeMount(v string) string {
-	replacer := strings.NewReplacer(`\040`, " ", `\011`, "	", `\012`, "
-", `\134`, "\")
+	replacer := strings.NewReplacer(`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, "\\")
 	return replacer.Replace(v)
 }
 
