@@ -27,6 +27,8 @@ const (
 	maxEvents            = 5000
 	maxIncidents         = 2000
 	maxNodes             = 4096
+	maxNodeLabels        = 16
+	maxNodeGroups        = 8
 	CurrentSchemaVersion = 2
 )
 
@@ -658,6 +660,95 @@ func cloneDiskState(in diskState) (diskState, error) {
 	return out, nil
 }
 
+func NormalizeNodeMetadata(labels map[string]string, groups []string) (map[string]string, []string, error) {
+	if len(labels) > maxNodeLabels {
+		return nil, nil, fmt.Errorf("node may have at most %d labels", maxNodeLabels)
+	}
+	if len(groups) > maxNodeGroups {
+		return nil, nil, fmt.Errorf("node may belong to at most %d groups", maxNodeGroups)
+	}
+	normalizedLabels := make(map[string]string, len(labels))
+	for key, value := range labels {
+		key = strings.ToLower(strings.TrimSpace(key))
+		value = strings.TrimSpace(value)
+		if key == "" || len(key) > 32 || !metadataNameOK(key) {
+			return nil, nil, fmt.Errorf("label key %q must be 1-32 characters using letters, digits, '.', '_' or '-'", key)
+		}
+		if len(value) > 64 || hasControl(value) {
+			return nil, nil, fmt.Errorf("label %q value must be at most 64 printable characters", key)
+		}
+		normalizedLabels[key] = value
+	}
+	seenGroups := map[string]bool{}
+	normalizedGroups := make([]string, 0, len(groups))
+	for _, group := range groups {
+		group = strings.ToLower(strings.TrimSpace(group))
+		if group == "" || len(group) > 32 || !metadataNameOK(group) {
+			return nil, nil, fmt.Errorf("group %q must be 1-32 characters using letters, digits, '.', '_' or '-'", group)
+		}
+		if seenGroups[group] {
+			continue
+		}
+		seenGroups[group] = true
+		normalizedGroups = append(normalizedGroups, group)
+	}
+	sort.Strings(normalizedGroups)
+	return normalizedLabels, normalizedGroups, nil
+}
+
+func metadataNameOK(v string) bool {
+	for _, r := range v {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+func hasControl(v string) bool {
+	for _, r := range v {
+		if r < 0x20 || r == 0x7f {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneLabels(v map[string]string) map[string]string {
+	if len(v) == 0 {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(v))
+	for k, value := range v {
+		out[k] = value
+	}
+	return out
+}
+
+func (s *Store) UpdateNodeMetadata(ref string, labels map[string]string, groups []string) error {
+	labels, groups, err := NormalizeNodeMetadata(labels, groups)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, n := s.resolveLocked(ref)
+	if n == nil {
+		return os.ErrNotExist
+	}
+	before, err := cloneDiskState(s.data)
+	if err != nil {
+		return err
+	}
+	n.Labels = cloneLabels(labels)
+	n.Groups = append([]string(nil), groups...)
+	if err := s.saveLocked(); err != nil {
+		s.data = before
+		return err
+	}
+	return nil
+}
+
 func (s *Store) RenameNode(ref, newName string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -927,7 +1018,12 @@ func statusOf(n *protocol.Node, now time.Time, p AlertPolicy) string {
 	return "OFFLINE"
 }
 func viewOf(n *protocol.Node, now time.Time, p AlertPolicy) protocol.NodeView {
-	return protocol.NodeView{ID: n.ID, Name: n.Name, OS: n.OS, Arch: n.Arch, AgentVersion: n.AgentVersion, RegisteredAt: n.RegisteredAt, LastHeartbeat: n.LastHeartbeat, Status: statusOf(n, now, p), Metrics: n.Metrics, Services: append([]protocol.ServiceStatus(nil), n.Services...)}
+	return protocol.NodeView{
+		ID: n.ID, Name: n.Name, OS: n.OS, Arch: n.Arch, AgentVersion: n.AgentVersion,
+		RegisteredAt: n.RegisteredAt, LastHeartbeat: n.LastHeartbeat, Status: statusOf(n, now, p),
+		Metrics: n.Metrics, Services: append([]protocol.ServiceStatus(nil), n.Services...),
+		Labels: cloneLabels(n.Labels), Groups: append([]string(nil), n.Groups...),
+	}
 }
 func HealthyServiceCount(v protocol.NodeView) (healthy, total int) {
 	for _, svc := range v.Services {
