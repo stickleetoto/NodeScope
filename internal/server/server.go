@@ -65,6 +65,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/nodes/{id}/services", s.services)
 	mux.HandleFunc("GET /api/v1/nodes/{id}/diagnosis", s.diagnosis)
 	mux.HandleFunc("PATCH /api/v1/nodes/{id}", s.renameNode)
+	mux.HandleFunc("PATCH /api/v1/nodes/{id}/metadata", s.updateNodeMetadata)
 	mux.HandleFunc("DELETE /api/v1/nodes/{id}", s.deleteNode)
 	return withRuntimeStats(s.runtime, withAPIHeaders(withLimits(mux)))
 }
@@ -652,7 +653,22 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, 401, "unauthorized", "read or admin token required")
 		return
 	}
-	writeJSON(w, 200, s.Store.Views(time.Now().UTC()))
+	labels, groups, err := parseFleetFilters(r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_fleet_filter", err.Error())
+		return
+	}
+	views := s.Store.Views(time.Now().UTC())
+	if len(labels) > 0 || len(groups) > 0 {
+		filtered := make([]protocol.NodeView, 0, len(views))
+		for _, node := range views {
+			if nodeMatchesFleetFilters(node, labels, groups) {
+				filtered = append(filtered, node)
+			}
+		}
+		views = filtered
+	}
+	writeJSON(w, 200, views)
 }
 
 func (s *Server) node(w http.ResponseWriter, r *http.Request) {
@@ -723,6 +739,73 @@ func (s *Server) renameNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) updateNodeMetadata(w http.ResponseWriter, r *http.Request) {
+	if !s.adminOK(r) {
+		writeAPIError(w, http.StatusUnauthorized, "admin_required", "admin token required")
+		return
+	}
+	var req protocol.NodeMetadataRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request")
+		return
+	}
+	labels, groups, err := store.NormalizeNodeMetadata(req.Labels, req.Groups)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_node_metadata", err.Error())
+		return
+	}
+	if err := s.Store.UpdateNodeMetadata(r.PathValue("id"), labels, groups); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeAPIError(w, http.StatusNotFound, "node_not_found", "node not found")
+		} else {
+			writeAPIError(w, http.StatusInternalServerError, "storage_failure", "storage failure")
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func parseFleetFilters(r *http.Request) (map[string]string, []string, error) {
+	rawLabels := r.URL.Query()["label"]
+	rawGroups := r.URL.Query()["group"]
+	if len(rawLabels) > 16 {
+		return nil, nil, fmt.Errorf("at most 16 label filters are allowed")
+	}
+	if len(rawGroups) > 8 {
+		return nil, nil, fmt.Errorf("at most 8 group filters are allowed")
+	}
+	labels := make(map[string]string, len(rawLabels))
+	for _, raw := range rawLabels {
+		key, value, ok := strings.Cut(raw, "=")
+		if !ok {
+			return nil, nil, fmt.Errorf("label filters must use key=value")
+		}
+		labels[key] = value
+	}
+	return store.NormalizeNodeMetadata(labels, rawGroups)
+}
+
+func nodeMatchesFleetFilters(node protocol.NodeView, labels map[string]string, groups []string) bool {
+	for key, value := range labels {
+		if node.Labels[key] != value {
+			return false
+		}
+	}
+	for _, wanted := range groups {
+		found := false
+		for _, group := range node.Groups {
+			if group == wanted {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) deleteNode(w http.ResponseWriter, r *http.Request) {
