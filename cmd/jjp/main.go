@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -442,7 +443,7 @@ func parseCLIAttrs(values []string) (map[string]string, error) {
 
 func cmdMetrics(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: nodescope metrics <history|trend|stats>")
+		return fmt.Errorf("usage: nodescope metrics <history|trend|rollup|stats>")
 	}
 	switch args[0] {
 	case "history":
