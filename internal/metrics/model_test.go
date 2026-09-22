@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jjp-monitor/jjp/internal/protocol"
+	"github.com/stickleetoto/NodeScope/internal/protocol"
 )
 
 type testCollector struct {
