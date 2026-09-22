@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jjp-monitor/jjp/internal/protocol"
+	"github.com/stickleetoto/NodeScope/internal/protocol"
 )
 
 const maxRollupBuckets = 10000
