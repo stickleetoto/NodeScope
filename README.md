@@ -278,6 +278,33 @@ MCP protocol traffic is written only to stdout; diagnostics use stderr.
 
 NodeScope was previously named **JJP / Jjamppong**. The public CLI and MCP identity now use `nodescope`, while the v1 API headers and on-disk `jjp` data directory remain unchanged for backwards compatibility. Existing `JJP_*` environment variables continue to work.
 
+## Prometheus export
+
+NodeScope can expose its current fleet and self-observability state in the Prometheus text exposition format:
+
+```bash
+curl -H "Authorization: Bearer $NODESCOPE_API_TOKEN" \
+  http://SERVER:7443/metrics
+```
+
+The endpoint is authenticated with the same read/admin token model as the API. It exports bounded current-state series such as:
+
+```text
+nodescope_nodes_total
+nodescope_nodes_online
+nodescope_active_alerts
+nodescope_active_incidents
+nodescope_node_up
+nodescope_node_cpu_ratio
+nodescope_node_memory_ratio
+nodescope_service_up
+nodescope_http_requests_total
+nodescope_telemetry_samples_total
+nodescope_history_bytes
+```
+
+NodeScope remains standalone; Prometheus/Grafana are optional consumers rather than runtime dependencies.
+
 ## HTTP API v1
 
 ```text
