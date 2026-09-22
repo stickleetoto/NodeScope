@@ -160,8 +160,8 @@ type RenameNodeRequest struct {
 
 
 type NodeMetadataRequest struct {
-	Labels map[string]string `json:"labels,omitempty"`
-	Groups []string          `json:"groups,omitempty"`
+	Labels map[string]string `json:"labels"`
+	Groups []string          `json:"groups"`
 }
 
 type APIInfo struct {
