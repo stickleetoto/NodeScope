@@ -23,6 +23,7 @@ import (
 	"github.com/jjp-monitor/jjp/internal/apiclient"
 	"github.com/jjp-monitor/jjp/internal/autostart"
 	"github.com/jjp-monitor/jjp/internal/filelock"
+	"github.com/jjp-monitor/jjp/internal/history"
 	"github.com/jjp-monitor/jjp/internal/mcpserver"
 	"github.com/jjp-monitor/jjp/internal/protocol"
 	"github.com/jjp-monitor/jjp/internal/server"
@@ -209,6 +210,12 @@ func cmdHost(args []string) error {
 		return err
 	}
 
+	historyDir := filepath.Join(filepath.Dir(*data), "history")
+	hist, err := history.Open(historyDir, history.DefaultOptions())
+	if err != nil {
+		return fmt.Errorf("open telemetry history: %w", err)
+	}
+
 	policy := st.AlertPolicy()
 	policyChanged := false
 	parsePercent := func(name, raw string, dst *float64) error {
@@ -263,6 +270,7 @@ func cmdHost(args []string) error {
 	fmt.Println("Listen:     ", *listen)
 	fmt.Println("State:      ", *data)
 	fmt.Println("Schema:     ", st.SchemaVersion())
+	fmt.Println("History:    ", historyDir)
 	if *tlsCert != "" {
 		fmt.Println("Transport:   HTTPS/TLS")
 	} else {
@@ -282,7 +290,7 @@ func cmdHost(args []string) error {
 
 	srv := &http.Server{
 		Addr:              *listen,
-		Handler:           (&server.Server{Store: st}).Handler(),
+		Handler:           (&server.Server{Store: st, History: hist}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
