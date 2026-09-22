@@ -435,7 +435,7 @@ func cmdMetricHistory(args []string, trend bool) error {
 	}
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	since := fs.Duration("since", time.Hour, "lookback duration")
-	limit := fs.Int("limit", 500, "maximum newest points")
+	limit := fs.Int("limit", 500, "maximum newest raw points")
 	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
 	serverURL := fs.String("server", envCompat("NODESCOPE_SERVER", "JJP_SERVER", "http://127.0.0.1:7443"), "server URL")
 	token := fs.String("token", envCompat("NODESCOPE_API_TOKEN", "JJP_API_TOKEN", envCompat("NODESCOPE_ADMIN_TOKEN", "JJP_ADMIN_TOKEN", "")), "read/admin API token")
@@ -459,43 +459,102 @@ func cmdMetricHistory(args []string, trend bool) error {
 	if err != nil {
 		return err
 	}
-	points, err := api.MetricHistory(context.Background(), fs.Arg(0), fs.Arg(1), time.Now().UTC().Add(-*since), time.Time{}, *limit)
-	if err != nil {
-		return err
-	}
-	if !trend {
-		if *jsonOut {
-			return writePrettyJSON(points)
+
+	if trend {
+		bucket := cliTrendBucket(*since)
+		buckets, err := api.MetricRollup(context.Background(), fs.Arg(0), fs.Arg(1), time.Now().UTC().Add(-*since), time.Time{}, bucket)
+		if err != nil {
+			return err
 		}
-		if len(points) == 0 {
-			fmt.Println("no metric samples")
+		out := summarizeRollupHistory(buckets, fs.Arg(0), fs.Arg(1), bucket)
+		if *jsonOut {
+			return writePrettyJSON(out)
+		}
+		fmt.Printf("%s / %s  bucket=%s\n", fs.Arg(0), fs.Arg(1), bucket)
+		fmt.Printf("samples: %v\n", out["count"])
+		if len(buckets) == 0 {
 			return nil
 		}
-		for _, p := range points {
-			fmt.Printf("%s  %-32s  %g %s\n", p.Sample.Timestamp.Local().Format("2006-01-02 15:04:05"), p.Sample.Name, p.Sample.Value, p.Sample.Unit)
+		fmt.Printf("first:   %g %s\n", out["first_value"], out["unit"])
+		fmt.Printf("last:    %g %s\n", out["last_value"], out["unit"])
+		fmt.Printf("min:     %g %s\n", out["min"], out["unit"])
+		fmt.Printf("max:     %g %s\n", out["max"], out["unit"])
+		fmt.Printf("average: %g %s\n", out["average"], out["unit"])
+		fmt.Printf("delta:   %g %s\n", out["delta"], out["unit"])
+		if rate, ok := out["rate_per_hour"]; ok {
+			fmt.Printf("rate/h:  %g %s/h\n", rate, out["unit"])
 		}
 		return nil
 	}
 
-	out := summarizeHistory(points, fs.Arg(0), fs.Arg(1))
-	if *jsonOut {
-		return writePrettyJSON(out)
+	points, err := api.MetricHistory(context.Background(), fs.Arg(0), fs.Arg(1), time.Now().UTC().Add(-*since), time.Time{}, *limit)
+	if err != nil {
+		return err
 	}
-	fmt.Printf("%s / %s\n", fs.Arg(0), fs.Arg(1))
-	fmt.Printf("samples: %v\n", out["count"])
+	if *jsonOut {
+		return writePrettyJSON(points)
+	}
 	if len(points) == 0 {
+		fmt.Println("no metric samples")
 		return nil
 	}
-	fmt.Printf("first:   %g %s\n", out["first_value"], out["unit"])
-	fmt.Printf("last:    %g %s\n", out["last_value"], out["unit"])
-	fmt.Printf("min:     %g %s\n", out["min"], out["unit"])
-	fmt.Printf("max:     %g %s\n", out["max"], out["unit"])
-	fmt.Printf("average: %g %s\n", out["average"], out["unit"])
-	fmt.Printf("delta:   %g %s\n", out["delta"], out["unit"])
-	if rate, ok := out["rate_per_hour"]; ok {
-		fmt.Printf("rate/h:  %g %s/h\n", rate, out["unit"])
+	for _, p := range points {
+		fmt.Printf("%s  %-32s  %g %s\n", p.Sample.Timestamp.Local().Format("2006-01-02 15:04:05"), p.Sample.Name, p.Sample.Value, p.Sample.Unit)
 	}
 	return nil
+}
+
+func cliTrendBucket(window time.Duration) time.Duration {
+	switch {
+	case window <= 6*time.Hour:
+		return time.Minute
+	case window <= 7*24*time.Hour:
+		return 5 * time.Minute
+	default:
+		return time.Hour
+	}
+}
+
+func summarizeRollupHistory(buckets []history.RollupBucket, node, metric string, bucket time.Duration) map[string]any {
+	out := map[string]any{"node": node, "metric": metric, "bucket": bucket.String(), "bucket_count": len(buckets)}
+	if len(buckets) == 0 {
+		out["count"] = 0
+		return out
+	}
+	first := buckets[0]
+	last := buckets[len(buckets)-1]
+	minValue, maxValue := first.Min, first.Max
+	totalCount := 0
+	weightedSum := 0.0
+	for _, b := range buckets {
+		totalCount += b.Count
+		weightedSum += b.Average * float64(b.Count)
+		if b.Min < minValue {
+			minValue = b.Min
+		}
+		if b.Max > maxValue {
+			maxValue = b.Max
+		}
+	}
+	out["count"] = totalCount
+	out["kind"] = first.Kind
+	out["unit"] = first.Unit
+	out["first_value"] = first.First
+	out["first_timestamp"] = first.Start
+	out["last_value"] = last.Last
+	out["last_timestamp"] = last.End
+	out["min"] = minValue
+	out["max"] = maxValue
+	if totalCount > 0 {
+		out["average"] = weightedSum / float64(totalCount)
+	}
+	out["delta"] = last.Last - first.First
+	duration := last.End.Sub(first.Start)
+	out["duration_seconds"] = duration.Seconds()
+	if duration > 0 {
+		out["rate_per_hour"] = (last.Last - first.First) / duration.Hours()
+	}
+	return out
 }
 
 func cmdMetricRollup(args []string) error {
