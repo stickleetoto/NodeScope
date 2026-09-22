@@ -190,6 +190,33 @@ func CollectSamples(ctx context.Context) ([]Sample, []CollectorError) {
 	return DefaultRegistry().Collect(ctx)
 }
 
+
+func CollectSamplesFromLegacy(ctx context.Context, m protocol.Metrics) ([]Sample, []CollectorError) {
+	out := legacyToSamples(m, time.Now().UTC())
+	r, err := NewRegistry(platformCollectors()...)
+	if err != nil {
+		return out, []CollectorError{{Collector: "registry", Err: err}}
+	}
+	extra, errs := r.Collect(ctx)
+	out = append(out, extra...)
+	return out, errs
+}
+
+func ToProtocolSamples(samples []Sample) []protocol.TelemetrySample {
+	out := make([]protocol.TelemetrySample, 0, len(samples))
+	for _, s := range samples {
+		attrs := make(map[string]string, len(s.Attributes))
+		for k, v := range s.Attributes {
+			attrs[k] = v
+		}
+		out = append(out, protocol.TelemetrySample{
+			Name: s.Name, Value: s.Value, Unit: s.Unit, Kind: string(s.Kind),
+			Timestamp: s.Timestamp.UTC(), Attributes: attrs, Collector: s.Collector,
+		})
+	}
+	return out
+}
+
 func legacyToSamples(m protocol.Metrics, ts time.Time) []Sample {
 	ts = ts.UTC()
 	out := []Sample{
