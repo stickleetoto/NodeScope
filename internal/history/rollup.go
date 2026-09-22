@@ -60,6 +60,9 @@ func (s *Store) Rollup(q Query, bucket time.Duration) ([]RollupBucket, error) {
 				if q.Metric != "" && sample.Name != q.Metric {
 					continue
 				}
+				if !matchesAttributes(sample.Attributes, q.Attributes) {
+					continue
+				}
 				ts := sample.Timestamp.UTC()
 				if !q.Since.IsZero() && ts.Before(q.Since) {
 					continue
