@@ -170,7 +170,7 @@ func (s *Server) handle(ctx context.Context, req rpcRequest) (rpcResponse, bool)
 }
 
 func (s *Server) instructions() string {
-	base := "Use get_overview first for broad questions about current status or what needs attention. For historical outage questions, use get_incidents first, then get_incident for the selected timeline; use get_recent_events only when raw event-level detail is necessary. Use diagnose_node only when one node needs deeper current-state explanation. Use get_node_trend for historical metric trends and get_metric_history only when raw metric evidence is needed. Prefer compact high-level tools over list_nodes to reduce unnecessary context. Incident correlation is deterministic by node and alert lifecycle; do not invent root causes that are not present in telemetry, findings, or event evidence."
+	base := "Use get_overview first for broad questions about current fleet status or what needs attention. Use get_system_health when the question is about NodeScope itself. For historical outage questions, use get_incidents first, then get_incident for the selected timeline; use get_recent_events only when raw event-level detail is necessary. Use diagnose_node only when one node needs deeper current-state explanation. Use get_node_trend for historical metric trends and get_metric_history only when raw metric evidence is needed. Prefer compact high-level tools over list_nodes to reduce unnecessary context. Incident correlation is deterministic by node and alert lifecycle; do not invent root causes that are not present in telemetry, findings, or event evidence."
 	if s.AllowWrite {
 		return base + " Rename/remove tools are enabled. Only mutate state when the user explicitly requests it. remove_node is destructive and requires confirm=true."
 	}
@@ -232,6 +232,7 @@ func (s *Server) tools() []toolDef {
 		{Name: "get_overview", Description: "Preferred first tool. Get a compact AI-oriented snapshot with overall health, attention flag, counts, unhealthy-node digests, active alerts, and recent events.", InputSchema: overviewArg, OutputSchema: overviewSchema(), Annotations: readAnn("NodeScope Overview")},
 		{Name: "diagnose_node", Description: "Explain one node using deterministic findings, evidence, severity, and suggested operator checks. Does not guess undocumented root causes.", InputSchema: nodeArg, OutputSchema: diagnosisSchema(), Annotations: readAnn("Diagnose NodeScope Node")},
 		{Name: "get_summary", Description: "Get aggregate NodeScope node, service, and active-alert counts.", InputSchema: empty, OutputSchema: summarySchema(), Annotations: readAnn("NodeScope Summary")},
+		{Name: "get_system_health", Description: "Inspect NodeScope itself: request/error rates, request latency, heartbeat and telemetry ingest counts, fleet size, and history storage usage.", InputSchema: empty, OutputSchema: systemHealthSchema(), Annotations: readAnn("NodeScope System Health")},
 		{Name: "get_unhealthy_nodes", Description: "List nodes that are offline/unstable or have active health problems.", InputSchema: empty, OutputSchema: arraySchema(nodeSchema()), Annotations: readAnn("Unhealthy NodeScope Nodes")},
 		{Name: "get_active_alerts", Description: "Get current unresolved NodeScope alerts, optionally filtered to one node.", InputSchema: filterArg, OutputSchema: arraySchema(alertSchema()), Annotations: readAnn("Active NodeScope Alerts")},
 		{Name: "get_incidents", Description: "Preferred historical health tool. Get correlated node incidents instead of raw event logs, optionally filtered by node, open/resolved status, and a lookback window.", InputSchema: incidentArg, OutputSchema: arraySchema(incidentSchema()), Annotations: readAnn("NodeScope Incidents")},
@@ -281,6 +282,8 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) (an
 		return s.API.Diagnosis(ctx, node)
 	case "get_summary":
 		return s.API.Summary(ctx)
+	case "get_system_health":
+		return s.API.SystemHealth(ctx)
 	case "list_nodes":
 		return s.API.Nodes(ctx)
 	case "get_unhealthy_nodes":
@@ -689,6 +692,37 @@ func trendSchema() map[string]any {
 			"requires_attribute_filter": map[string]any{"type": "boolean"},
 		},
 		"required": []string{"node", "metric", "count"},
+	}
+}
+
+func systemHealthSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"generated_at": map[string]any{"type": "string"},
+			"uptime_seconds": map[string]any{"type": "integer"},
+			"requests_total": map[string]any{"type": "integer"},
+			"client_errors_total": map[string]any{"type": "integer"},
+			"server_errors_total": map[string]any{"type": "integer"},
+			"request_average_ms": map[string]any{"type": "number"},
+			"request_max_ms": map[string]any{"type": "number"},
+			"heartbeats_total": map[string]any{"type": "integer"},
+			"telemetry_batches_total": map[string]any{"type": "integer"},
+			"telemetry_samples_total": map[string]any{"type": "integer"},
+			"nodes_total": map[string]any{"type": "integer"},
+			"nodes_online": map[string]any{"type": "integer"},
+			"history_bytes": map[string]any{"type": "integer"},
+			"history_max_bytes": map[string]any{"type": "integer"},
+			"history_raw_segments": map[string]any{"type": "integer"},
+			"history_rollup_files": map[string]any{"type": "integer"},
+			"history_rollup_bytes": map[string]any{"type": "integer"},
+		},
+		"required": []string{
+			"generated_at", "uptime_seconds", "requests_total", "client_errors_total", "server_errors_total",
+			"request_average_ms", "request_max_ms", "heartbeats_total", "telemetry_batches_total",
+			"telemetry_samples_total", "nodes_total", "nodes_online", "history_bytes", "history_max_bytes",
+			"history_raw_segments", "history_rollup_files", "history_rollup_bytes",
+		},
 	}
 }
 
