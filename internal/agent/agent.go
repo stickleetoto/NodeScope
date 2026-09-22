@@ -87,7 +87,11 @@ func Run(ctx context.Context, c Config, interval time.Duration, onBeat func(prot
 		if cycleErr == nil {
 			samples, _ := metrics.CollectSamplesFromLegacy(ctx, m)
 			if len(samples) > 0 {
-				if _, err := telemetryWAL.Enqueue(metrics.ToProtocolSamples(samples)); err != nil {
+				wireSamples := metrics.ToProtocolSamples(samples)
+				if stats, err := telemetryWAL.Stats(); err == nil {
+					wireSamples = append(wireSamples, walTelemetrySamples(stats)...)
+				}
+				if _, err := telemetryWAL.Enqueue(wireSamples); err != nil {
 					cycleErr = fmt.Errorf("queue telemetry: %w", err)
 				}
 			}
@@ -128,6 +132,21 @@ func Run(ctx context.Context, c Config, interval time.Duration, onBeat func(prot
 			return ctx.Err()
 		case <-t.C:
 		}
+	}
+}
+
+func walTelemetrySamples(stats agentwal.Stats) []protocol.TelemetrySample {
+	now := time.Now().UTC()
+	utilization := 0.0
+	if stats.MaxBytes > 0 {
+		utilization = float64(stats.Bytes) / float64(stats.MaxBytes)
+	}
+	return []protocol.TelemetrySample{
+		{Name: "nodescope.agent.wal.pending_batches", Value: float64(stats.PendingBatches), Unit: "{batch}", Kind: "gauge", Timestamp: now, Collector: "nodescope"},
+		{Name: "nodescope.agent.wal.pending_samples", Value: float64(stats.PendingSamples), Unit: "{sample}", Kind: "gauge", Timestamp: now, Collector: "nodescope"},
+		{Name: "nodescope.agent.wal.bytes", Value: float64(stats.Bytes), Unit: "By", Kind: "gauge", Timestamp: now, Collector: "nodescope"},
+		{Name: "nodescope.agent.wal.utilization", Value: utilization, Unit: "1", Kind: "gauge", Timestamp: now, Collector: "nodescope"},
+		{Name: "nodescope.agent.wal.dropped_batches", Value: float64(stats.DroppedBatches), Unit: "{batch}", Kind: "counter", Timestamp: now, Collector: "nodescope"},
 	}
 }
 
