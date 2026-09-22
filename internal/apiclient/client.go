@@ -170,6 +170,26 @@ func (c *Client) MetricHistoryStats(ctx context.Context) (history.Stats, error) 
 	return out, err
 }
 
+
+func (c *Client) MetricRollup(ctx context.Context, ref, metric string, since, until time.Time, bucket time.Duration) ([]history.RollupBucket, error) {
+	var out []history.RollupBucket
+	if bucket <= 0 {
+		bucket = time.Minute
+	}
+	q := url.Values{}
+	q.Set("node", ref)
+	q.Set("metric", metric)
+	q.Set("bucket", bucket.String())
+	if !since.IsZero() {
+		q.Set("since", since.UTC().Format(time.RFC3339))
+	}
+	if !until.IsZero() {
+		q.Set("until", until.UTC().Format(time.RFC3339))
+	}
+	err := c.request(ctx, http.MethodGet, "/api/v1/metrics/rollup?"+q.Encode(), nil, http.StatusOK, &out)
+	return out, err
+}
+
 func (c *Client) Node(ctx context.Context, ref string) (protocol.NodeView, error) {
 	var out protocol.NodeView
 	err := c.request(ctx, http.MethodGet, "/api/v1/nodes/"+url.PathEscape(ref), nil, http.StatusOK, &out)
