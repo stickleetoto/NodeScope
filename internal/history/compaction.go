@@ -35,14 +35,15 @@ func (s *Store) Compact(now time.Time) error {
 		if e.IsDir() || !strings.HasPrefix(e.Name(), "segment-") || !strings.HasSuffix(e.Name(), ".jsonl") {
 			continue
 		}
-		info, err := e.Info()
+		path := filepath.Join(s.dir, e.Name())
+		oldest, err := oldestSampleTime(path)
 		if err != nil {
 			return err
 		}
-		if info.ModTime().UTC().After(cutoff) {
+		if oldest.IsZero() || oldest.After(cutoff) {
 			continue
 		}
-		segments = append(segments, candidate{name: e.Name(), path: filepath.Join(s.dir, e.Name()), mod: info.ModTime().UTC()})
+		segments = append(segments, candidate{name: e.Name(), path: path, mod: oldest})
 	}
 	sort.Slice(segments, func(i, j int) bool {
 		if segments[i].mod.Equal(segments[j].mod) {
@@ -95,8 +96,19 @@ func (s *Store) rotateStaleHeadLocked(now time.Time) error {
 	} else if err != nil {
 		return err
 	}
+	oldest, err := oldestSampleTime(head)
+	if err != nil {
+		return err
+	}
+	if oldest.IsZero() || oldest.After(now.Add(-s.opts.RawRetention)) {
+		return nil
+	}
+	return s.rotateHeadLocked(head)
+}
+
+func oldestSampleTime(path string) (time.Time, error) {
 	var oldest time.Time
-	err := scanRecords(head, func(rec record) error {
+	err := scanRecords(path, func(rec record) error {
 		for _, sample := range rec.Samples {
 			ts := sample.Timestamp.UTC()
 			if ts.IsZero() {
@@ -112,12 +124,9 @@ func (s *Store) rotateStaleHeadLocked(now time.Time) error {
 		return nil
 	})
 	if err != nil && err != errStopScan {
-		return err
+		return time.Time{}, err
 	}
-	if oldest.IsZero() || oldest.After(now.Add(-s.opts.RawRetention)) {
-		return nil
-	}
-	return s.rotateHeadLocked(head)
+	return oldest, nil
 }
 
 var errStopScan = fmt.Errorf("stop history scan")
