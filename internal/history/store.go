@@ -19,6 +19,8 @@ import (
 const (
 	defaultMaxSegmentBytes = 8 << 20
 	defaultMaxTotalBytes   = 256 << 20
+	defaultRawRetention    = 6 * time.Hour
+	defaultRollupRetention = 90 * 24 * time.Hour
 	maxBatchSamples        = 4096
 	maxRecordBytes         = 4 << 20
 )
@@ -26,10 +28,17 @@ const (
 type Options struct {
 	MaxSegmentBytes int64
 	MaxTotalBytes   int64
+	RawRetention    time.Duration
+	RollupRetention time.Duration
 }
 
 func DefaultOptions() Options {
-	return Options{MaxSegmentBytes: defaultMaxSegmentBytes, MaxTotalBytes: defaultMaxTotalBytes}
+	return Options{
+		MaxSegmentBytes: defaultMaxSegmentBytes,
+		MaxTotalBytes: defaultMaxTotalBytes,
+		RawRetention: defaultRawRetention,
+		RollupRetention: defaultRollupRetention,
+	}
 }
 
 type record struct {
@@ -59,7 +68,11 @@ type Stats struct {
 	NodeAcks   map[string]uint64 `json:"node_acks"`
 	HeadBytes  int64             `json:"head_bytes"`
 	MaxBytes   int64             `json:"max_bytes"`
-	MaxSegment int64             `json:"max_segment_bytes"`
+	MaxSegment       int64             `json:"max_segment_bytes"`
+	RollupFiles      int               `json:"rollup_files"`
+	RollupBytes      int64             `json:"rollup_bytes"`
+	RawRetentionSec  int64             `json:"raw_retention_seconds"`
+	RollupRetentionSec int64           `json:"rollup_retention_seconds"`
 }
 
 type Store struct {
@@ -81,6 +94,15 @@ func Open(dir string, opts Options) (*Store, error) {
 	}
 	if opts.MaxTotalBytes < opts.MaxSegmentBytes {
 		return nil, fmt.Errorf("history max total bytes must be >= max segment bytes")
+	}
+	if opts.RawRetention <= 0 {
+		opts.RawRetention = defaultRawRetention
+	}
+	if opts.RollupRetention <= 0 {
+		opts.RollupRetention = defaultRollupRetention
+	}
+	if opts.RollupRetention < opts.RawRetention {
+		return nil, fmt.Errorf("rollup retention must be >= raw retention")
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -244,6 +266,8 @@ func (s *Store) Stats() (Stats, error) {
 		NodeAcks:   make(map[string]uint64, len(s.latest)),
 		MaxBytes:   s.opts.MaxTotalBytes,
 		MaxSegment: s.opts.MaxSegmentBytes,
+		RawRetentionSec: int64(s.opts.RawRetention.Seconds()),
+		RollupRetentionSec: int64(s.opts.RollupRetention.Seconds()),
 	}
 	for k, v := range s.latest {
 		out.NodeAcks[k] = v
@@ -262,6 +286,10 @@ func (s *Store) Stats() (Stats, error) {
 			out.Bytes += info.Size()
 		case strings.HasPrefix(e.Name(), "segment-") && strings.HasSuffix(e.Name(), ".jsonl"):
 			out.Segments++
+			out.Bytes += info.Size()
+		case strings.HasPrefix(e.Name(), "rollup-1m-") && strings.HasSuffix(e.Name(), ".json"):
+			out.RollupFiles++
+			out.RollupBytes += info.Size()
 			out.Bytes += info.Size()
 		}
 	}
