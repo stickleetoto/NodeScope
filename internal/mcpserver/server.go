@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jjp-monitor/jjp/internal/apiclient"
+	"github.com/jjp-monitor/jjp/internal/history"
 	"github.com/jjp-monitor/jjp/internal/protocol"
 )
 
@@ -169,7 +170,7 @@ func (s *Server) handle(ctx context.Context, req rpcRequest) (rpcResponse, bool)
 }
 
 func (s *Server) instructions() string {
-	base := "Use get_overview first for broad questions about current status or what needs attention. For historical outage questions, use get_incidents first, then get_incident for the selected timeline; use get_recent_events only when raw event-level detail is necessary. Use diagnose_node only when one node needs deeper current-state explanation. Prefer compact high-level tools over list_nodes to reduce unnecessary context. Incident correlation is deterministic by node and alert lifecycle; do not invent root causes that are not present in telemetry, findings, or event evidence."
+	base := "Use get_overview first for broad questions about current status or what needs attention. For historical outage questions, use get_incidents first, then get_incident for the selected timeline; use get_recent_events only when raw event-level detail is necessary. Use diagnose_node only when one node needs deeper current-state explanation. Use get_node_trend for historical metric trends and get_metric_history only when raw metric evidence is needed. Prefer compact high-level tools over list_nodes to reduce unnecessary context. Incident correlation is deterministic by node and alert lifecycle; do not invent root causes that are not present in telemetry, findings, or event evidence."
 	if s.AllowWrite {
 		return base + " Rename/remove tools are enabled. Only mutate state when the user explicitly requests it. remove_node is destructive and requires confirm=true."
 	}
@@ -213,6 +214,16 @@ func (s *Server) tools() []toolDef {
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]any{"events": map[string]any{"type": "integer", "minimum": 0, "maximum": 50, "description": "Recent events to include (default 10; use 0 to omit history)"}},
 	}
+	historyArg := map[string]any{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]any{
+			"node":          map[string]any{"type": "string", "description": "Node name or node ID"},
+			"metric":        map[string]any{"type": "string", "description": "Exact metric name, for example system.memory.utilization"},
+			"since_minutes": map[string]any{"type": "integer", "minimum": 1, "maximum": 525600, "description": "Lookback window in minutes (default 60)"},
+			"limit":         map[string]any{"type": "integer", "minimum": 1, "maximum": 5000, "description": "Maximum number of newest metric points (default 500)"},
+		},
+		"required": []string{"node", "metric"},
+	}
 	readAnn := func(title string) map[string]any {
 		return map[string]any{"title": title, "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
 	}
@@ -228,6 +239,9 @@ func (s *Server) tools() []toolDef {
 		{Name: "get_node", Description: "Get detailed status for one NodeScope node by name or ID.", InputSchema: nodeArg, OutputSchema: nodeSchema(), Annotations: readAnn("NodeScope Node Details")},
 		{Name: "list_services", Description: "Get monitored service states for one NodeScope node.", InputSchema: nodeArg, OutputSchema: arraySchema(serviceSchema()), Annotations: readAnn("NodeScope Node Services")},
 		{Name: "list_nodes", Description: "List every registered NodeScope node with full metrics and service health. Prefer get_overview for broad health questions because this can return much more context.", InputSchema: empty, OutputSchema: arraySchema(nodeSchema()), Annotations: readAnn("All NodeScope Nodes")},
+		{Name: "get_metric_history", Description: "Get bounded raw historical metric evidence for one node and exact metric name. Use a time window and prefer get_node_trend when aggregates are sufficient.", InputSchema: historyArg, OutputSchema: arraySchema(historyPointSchema()), Annotations: readAnn("NodeScope Metric History")},
+		{Name: "get_node_trend", Description: "Summarize one node metric over a bounded lookback window using stored samples: count, min, max, average, first, last, delta, and per-hour rate.", InputSchema: historyArg, OutputSchema: trendSchema(), Annotations: readAnn("NodeScope Metric Trend")},
+		{Name: "get_resource_peaks", Description: "Return deterministic min/max peak information for one node metric over a bounded lookback window.", InputSchema: historyArg, OutputSchema: trendSchema(), Annotations: readAnn("NodeScope Resource Peaks")},
 	}
 	if s.AllowWrite {
 		out = append(out,
@@ -322,6 +336,48 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) (an
 			return nil, err
 		}
 		return s.API.Services(ctx, node)
+	case "get_metric_history":
+		node, err := argString(raw, "node")
+		if err != nil {
+			return nil, err
+		}
+		metric, err := argString(raw, "metric")
+		if err != nil {
+			return nil, err
+		}
+		sinceMinutes, err := optionalInt(raw, "since_minutes", 60, 1, 525600)
+		if err != nil {
+			return nil, err
+		}
+		limit, err := optionalInt(raw, "limit", 500, 1, 5000)
+		if err != nil {
+			return nil, err
+		}
+		since := time.Now().UTC().Add(-time.Duration(sinceMinutes) * time.Minute)
+		return s.API.MetricHistory(ctx, node, metric, since, time.Time{}, limit)
+	case "get_node_trend", "get_resource_peaks":
+		node, err := argString(raw, "node")
+		if err != nil {
+			return nil, err
+		}
+		metric, err := argString(raw, "metric")
+		if err != nil {
+			return nil, err
+		}
+		sinceMinutes, err := optionalInt(raw, "since_minutes", 60, 1, 525600)
+		if err != nil {
+			return nil, err
+		}
+		limit, err := optionalInt(raw, "limit", 500, 1, 5000)
+		if err != nil {
+			return nil, err
+		}
+		since := time.Now().UTC().Add(-time.Duration(sinceMinutes) * time.Minute)
+		points, err := s.API.MetricHistory(ctx, node, metric, since, time.Time{}, limit)
+		if err != nil {
+			return nil, err
+		}
+		return summarizeMetricPoints(node, metric, points), nil
 	case "rename_node":
 		if !s.AllowWrite {
 			return nil, fmt.Errorf("write tools are disabled; start nodescope mcp with --allow-write")
@@ -444,6 +500,78 @@ func okResponse(id json.RawMessage, result any) rpcResponse {
 
 func errorResponse(id json.RawMessage, code int, message string) rpcResponse {
 	return rpcResponse{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: code, Message: message}}
+}
+
+func summarizeMetricPoints(node, metric string, points []history.Point) map[string]any {
+	out := map[string]any{
+		"node": node,
+		"metric": metric,
+		"count": len(points),
+	}
+	if len(points) == 0 {
+		return out
+	}
+	first := points[0].Sample
+	last := points[len(points)-1].Sample
+	minPoint, maxPoint := points[0], points[0]
+	sum := 0.0
+	for _, p := range points {
+		sum += p.Sample.Value
+		if p.Sample.Value < minPoint.Sample.Value {
+			minPoint = p
+		}
+		if p.Sample.Value > maxPoint.Sample.Value {
+			maxPoint = p
+		}
+	}
+	out["kind"] = first.Kind
+	out["unit"] = first.Unit
+	out["first"] = map[string]any{"value": first.Value, "timestamp": first.Timestamp}
+	out["last"] = map[string]any{"value": last.Value, "timestamp": last.Timestamp}
+	out["min"] = map[string]any{"value": minPoint.Sample.Value, "timestamp": minPoint.Sample.Timestamp}
+	out["max"] = map[string]any{"value": maxPoint.Sample.Value, "timestamp": maxPoint.Sample.Timestamp}
+	out["average"] = sum / float64(len(points))
+	out["delta"] = last.Value - first.Value
+	duration := last.Timestamp.Sub(first.Timestamp)
+	out["duration_seconds"] = duration.Seconds()
+	if duration > 0 {
+		out["rate_per_hour"] = (last.Value - first.Value) / duration.Hours()
+	}
+	return out
+}
+
+func historyPointSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"node_id": map[string]any{"type": "string"},
+			"sequence": map[string]any{"type": "integer"},
+			"sample": map[string]any{"type": "object"},
+		},
+		"required": []string{"node_id", "sequence", "sample"},
+	}
+}
+
+func trendSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"node": map[string]any{"type": "string"},
+			"metric": map[string]any{"type": "string"},
+			"count": map[string]any{"type": "integer"},
+			"kind": map[string]any{"type": "string"},
+			"unit": map[string]any{"type": "string"},
+			"first": map[string]any{"type": "object"},
+			"last": map[string]any{"type": "object"},
+			"min": map[string]any{"type": "object"},
+			"max": map[string]any{"type": "object"},
+			"average": map[string]any{"type": "number"},
+			"delta": map[string]any{"type": "number"},
+			"duration_seconds": map[string]any{"type": "number"},
+			"rate_per_hour": map[string]any{"type": "number"},
+		},
+		"required": []string{"node", "metric", "count"},
+	}
 }
 
 func summarySchema() map[string]any {
