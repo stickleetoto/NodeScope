@@ -223,6 +223,10 @@ func cmdHost(args []string) error {
 		return fmt.Errorf("open telemetry history: %w", err)
 	}
 
+	if err := hist.Compact(time.Now().UTC()); err != nil {
+		return fmt.Errorf("compact telemetry history: %w", err)
+	}
+
 	policy := st.AlertPolicy()
 	policyChanged := false
 	parsePercent := func(name, raw string, dst *float64) error {
@@ -316,6 +320,20 @@ func cmdHost(args []string) error {
 			case now := <-ticker.C:
 				if err := st.Evaluate(now.UTC()); err != nil {
 					fmt.Fprintln(os.Stderr, "alert evaluator:", err)
+				}
+			}
+		}
+	}()
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-ticker.C:
+				if err := hist.Compact(now.UTC()); err != nil {
+					fmt.Fprintln(os.Stderr, "history compactor:", err)
 				}
 			}
 		}
