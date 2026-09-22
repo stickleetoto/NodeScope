@@ -68,7 +68,7 @@ func Run(ctx context.Context, c Config, interval time.Duration, onBeat func(prot
 	if interval < time.Second {
 		interval = time.Second
 	}
-	walPath, err := DefaultTelemetryWALPath()
+	walPath, err := DefaultTelemetryWALPath(c.NodeID)
 	if err != nil {
 		return err
 	}
@@ -81,39 +81,46 @@ func Run(ctx context.Context, c Config, interval time.Duration, onBeat func(prot
 	const maxBackoff = 30 * time.Second
 
 	for {
-		m, cycleErr := metrics.Collect()
+		m, collectErr := metrics.Collect()
 		services := servicecheck.CheckAll(ctx, c.Services)
 
-		if cycleErr == nil {
-			samples, _ := metrics.CollectSamplesFromLegacy(ctx, m)
+		var telemetryErr error
+		if collectErr == nil {
+			samples, collectorErrs := metrics.CollectSamplesFromLegacy(ctx, m)
+			if len(collectorErrs) > 0 {
+				parts := make([]string, 0, len(collectorErrs))
+				for _, collectorErr := range collectorErrs {
+					parts = append(parts, collectorErr.Error())
+				}
+				telemetryErr = fmt.Errorf("collector warnings: %s", strings.Join(parts, "; "))
+			}
 			if len(samples) > 0 {
 				wireSamples := metrics.ToProtocolSamples(samples)
-				if stats, err := telemetryWAL.Stats(); err == nil {
+				if stats, statsErr := telemetryWAL.Stats(); statsErr == nil {
 					wireSamples = append(wireSamples, walTelemetrySamples(stats)...)
 				}
-				if _, err := telemetryWAL.Enqueue(wireSamples); err != nil {
-					cycleErr = fmt.Errorf("queue telemetry: %w", err)
+				if _, enqueueErr := telemetryWAL.Enqueue(wireSamples); enqueueErr != nil {
+					telemetryErr = joinCycleErrors(telemetryErr, fmt.Errorf("queue telemetry: %w", enqueueErr))
 				}
 			}
 		}
-		if cycleErr == nil {
-			if err := sendHeartbeat(ctx, c, m, services); err != nil {
-				cycleErr = err
-			}
+
+		heartbeatErr := collectErr
+		if heartbeatErr == nil {
+			heartbeatErr = sendHeartbeat(ctx, c, m, services)
 		}
 
-		// Flush pending telemetry even when the current metric collection failed:
-		// this lets older durable batches drain as soon as connectivity returns.
-		if err := flushTelemetry(ctx, c, telemetryWAL); err != nil && cycleErr == nil {
-			cycleErr = err
-		}
-
+		// Telemetry failures never slow the liveness heartbeat cadence. The
+		// bounded WAL absorbs history outages while heartbeat/current state can
+		// keep flowing independently.
+		flushErr := flushTelemetry(ctx, c, telemetryWAL)
+		reportErr := joinCycleErrors(heartbeatErr, telemetryErr, flushErr)
 		if onBeat != nil {
-			onBeat(m, services, cycleErr)
+			onBeat(m, services, reportErr)
 		}
 
 		delay := interval
-		if cycleErr != nil {
+		if heartbeatErr != nil {
 			delay = backoff
 			backoff *= 2
 			if backoff > maxBackoff {
@@ -133,6 +140,19 @@ func Run(ctx context.Context, c Config, interval time.Duration, onBeat func(prot
 		case <-t.C:
 		}
 	}
+}
+
+func joinCycleErrors(errs ...error) error {
+	parts := make([]string, 0, len(errs))
+	for _, err := range errs {
+		if err != nil {
+			parts = append(parts, err.Error())
+		}
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s", strings.Join(parts, "; "))
 }
 
 func walTelemetrySamples(stats agentwal.Stats) []protocol.TelemetrySample {
