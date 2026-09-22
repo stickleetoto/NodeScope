@@ -368,16 +368,13 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) (an
 		if err != nil {
 			return nil, err
 		}
-		limit, err := optionalInt(raw, "limit", 500, 1, 5000)
-		if err != nil {
-			return nil, err
-		}
 		since := time.Now().UTC().Add(-time.Duration(sinceMinutes) * time.Minute)
-		points, err := s.API.MetricHistory(ctx, node, metric, since, time.Time{}, limit)
+		bucket := trendBucket(time.Duration(sinceMinutes) * time.Minute)
+		buckets, err := s.API.MetricRollup(ctx, node, metric, since, time.Time{}, bucket)
 		if err != nil {
 			return nil, err
 		}
-		return summarizeMetricPoints(node, metric, points), nil
+		return summarizeRollupBuckets(node, metric, bucket, buckets), nil
 	case "rename_node":
 		if !s.AllowWrite {
 			return nil, fmt.Errorf("write tools are disabled; start nodescope mcp with --allow-write")
@@ -500,6 +497,62 @@ func okResponse(id json.RawMessage, result any) rpcResponse {
 
 func errorResponse(id json.RawMessage, code int, message string) rpcResponse {
 	return rpcResponse{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: code, Message: message}}
+}
+
+func trendBucket(window time.Duration) time.Duration {
+	switch {
+	case window <= 6*time.Hour:
+		return time.Minute
+	case window <= 7*24*time.Hour:
+		return 5 * time.Minute
+	default:
+		return time.Hour
+	}
+}
+
+func summarizeRollupBuckets(node, metric string, bucket time.Duration, buckets []history.RollupBucket) map[string]any {
+	out := map[string]any{
+		"node": node,
+		"metric": metric,
+		"bucket_seconds": bucket.Seconds(),
+		"bucket_count": len(buckets),
+	}
+	if len(buckets) == 0 {
+		out["count"] = 0
+		return out
+	}
+	first := buckets[0]
+	last := buckets[len(buckets)-1]
+	minBucket, maxBucket := first, first
+	totalCount := 0
+	weightedSum := 0.0
+	for _, b := range buckets {
+		totalCount += b.Count
+		weightedSum += b.Average * float64(b.Count)
+		if b.Min < minBucket.Min {
+			minBucket = b
+		}
+		if b.Max > maxBucket.Max {
+			maxBucket = b
+		}
+	}
+	out["count"] = totalCount
+	out["kind"] = first.Kind
+	out["unit"] = first.Unit
+	out["first"] = map[string]any{"value": first.First, "timestamp": first.Start}
+	out["last"] = map[string]any{"value": last.Last, "timestamp": last.End}
+	out["min"] = map[string]any{"value": minBucket.Min, "timestamp": minBucket.Start}
+	out["max"] = map[string]any{"value": maxBucket.Max, "timestamp": maxBucket.Start}
+	if totalCount > 0 {
+		out["average"] = weightedSum / float64(totalCount)
+	}
+	out["delta"] = last.Last - first.First
+	duration := last.End.Sub(first.Start)
+	out["duration_seconds"] = duration.Seconds()
+	if duration > 0 {
+		out["rate_per_hour"] = (last.Last - first.First) / duration.Hours()
+	}
+	return out
 }
 
 func summarizeMetricPoints(node, metric string, points []history.Point) map[string]any {
