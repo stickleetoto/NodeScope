@@ -31,6 +31,15 @@ func DefaultConfigPath() (string, error) {
 	return filepath.Join(d, "jjp", "agent.json"), nil
 }
 
+
+func DefaultTelemetryWALPath() (string, error) {
+	d, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d, "jjp", "telemetry.wal"), nil
+}
+
 func SaveConfig(path string, c Config) error {
 	if err := ValidateConfig(c); err != nil {
 		return err
