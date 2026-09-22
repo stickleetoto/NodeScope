@@ -219,6 +219,7 @@ func (s *Server) tools() []toolDef {
 		"properties": map[string]any{
 			"node":          map[string]any{"type": "string", "description": "Node name or node ID"},
 			"metric":        map[string]any{"type": "string", "description": "Exact metric name, for example system.memory.utilization"},
+			"attributes":    map[string]any{"type": "object", "maxProperties": 8, "additionalProperties": map[string]any{"type": "string"}, "description": "Optional exact series filters such as interface=eth0, direction=receive, device=nvme0n1, or mount=/data"},
 			"since_minutes": map[string]any{"type": "integer", "minimum": 1, "maximum": 525600, "description": "Lookback window in minutes (default 60)"},
 			"limit":         map[string]any{"type": "integer", "minimum": 1, "maximum": 5000, "description": "Maximum number of newest metric points (default 500)"},
 		},
@@ -353,8 +354,12 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) (an
 		if err != nil {
 			return nil, err
 		}
+		attrs, err := optionalStringMap(raw, "attributes", 8)
+		if err != nil {
+			return nil, err
+		}
 		since := time.Now().UTC().Add(-time.Duration(sinceMinutes) * time.Minute)
-		return s.API.MetricHistory(ctx, node, metric, since, time.Time{}, limit)
+		return s.API.MetricHistoryFiltered(ctx, node, metric, attrs, since, time.Time{}, limit)
 	case "get_node_trend", "get_resource_peaks":
 		node, err := argString(raw, "node")
 		if err != nil {
@@ -368,9 +373,13 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) (an
 		if err != nil {
 			return nil, err
 		}
+		attrs, err := optionalStringMap(raw, "attributes", 8)
+		if err != nil {
+			return nil, err
+		}
 		since := time.Now().UTC().Add(-time.Duration(sinceMinutes) * time.Minute)
 		bucket := trendBucket(time.Duration(sinceMinutes) * time.Minute)
-		buckets, err := s.API.MetricRollup(ctx, node, metric, since, time.Time{}, bucket)
+		buckets, err := s.API.MetricRollupFiltered(ctx, node, metric, attrs, since, time.Time{}, bucket)
 		if err != nil {
 			return nil, err
 		}
@@ -453,6 +462,36 @@ func optionalString(raw json.RawMessage, key string) string {
 	}
 	v, _ := args[key].(string)
 	return strings.TrimSpace(v)
+}
+
+func optionalStringMap(raw json.RawMessage, key string, maxItems int) (map[string]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var args map[string]any
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return nil, fmt.Errorf("invalid tool arguments")
+	}
+	v, ok := args[key]
+	if !ok {
+		return nil, nil
+	}
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("argument %q must be an object", key)
+	}
+	if len(obj) > maxItems {
+		return nil, fmt.Errorf("argument %q may contain at most %d entries", key, maxItems)
+	}
+	out := make(map[string]string, len(obj))
+	for k, rawValue := range obj {
+		value, ok := rawValue.(string)
+		if !ok || strings.TrimSpace(k) == "" || len(k) > 64 || len(value) > 128 {
+			return nil, fmt.Errorf("argument %q contains an invalid attribute", key)
+		}
+		out[k] = value
+	}
+	return out, nil
 }
 
 func optionalInt(raw json.RawMessage, key string, def, min, max int) (int, error) {
