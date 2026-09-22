@@ -46,6 +46,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/telemetry", s.telemetry)
 	mux.HandleFunc("GET /api/v1/metrics/history", s.metricHistory)
 	mux.HandleFunc("GET /api/v1/metrics/history/stats", s.metricHistoryStats)
+	mux.HandleFunc("GET /api/v1/metrics/rollup", s.metricRollup)
 	mux.HandleFunc("GET /api/v1/summary", s.summary)
 	mux.HandleFunc("GET /api/v1/overview", s.overview)
 	mux.HandleFunc("GET /api/v1/unhealthy", s.unhealthy)
@@ -265,6 +266,57 @@ func (s *Server) metricHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, points)
+}
+
+func (s *Server) metricRollup(w http.ResponseWriter, r *http.Request) {
+	if !s.readOK(r) {
+		writeAPIError(w, http.StatusUnauthorized, "unauthorized", "read or admin token required")
+		return
+	}
+	if s.History == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "history_unavailable", "telemetry history is unavailable")
+		return
+	}
+	nodeRef := strings.TrimSpace(r.URL.Query().Get("node"))
+	metric := strings.TrimSpace(r.URL.Query().Get("metric"))
+	if nodeRef == "" || metric == "" {
+		writeAPIError(w, http.StatusBadRequest, "missing_filter", "node and metric are required")
+		return
+	}
+	v, ok := s.Store.ViewByNameOrID(nodeRef, time.Now().UTC())
+	if !ok {
+		writeAPIError(w, http.StatusNotFound, "node_not_found", "node not found")
+		return
+	}
+	bucketRaw := strings.TrimSpace(r.URL.Query().Get("bucket"))
+	if bucketRaw == "" {
+		bucketRaw = "1m"
+	}
+	bucket, err := time.ParseDuration(bucketRaw)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_bucket", "bucket must be a valid duration")
+		return
+	}
+	since, err := parseHistoryTime("since", r.URL.Query().Get("since"))
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_since", err.Error())
+		return
+	}
+	until, err := parseHistoryTime("until", r.URL.Query().Get("until"))
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_until", err.Error())
+		return
+	}
+	if !since.IsZero() && !until.IsZero() && until.Before(since) {
+		writeAPIError(w, http.StatusBadRequest, "invalid_window", "until must be at or after since")
+		return
+	}
+	out, err := s.History.Rollup(history.Query{NodeID: v.ID, Metric: metric, Since: since, Until: until}, bucket)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "rollup_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) metricHistoryStats(w http.ResponseWriter, r *http.Request) {
