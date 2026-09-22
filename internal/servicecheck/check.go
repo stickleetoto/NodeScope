@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jjp-monitor/jjp/internal/protocol"
+	"github.com/stickleetoto/NodeScope/internal/protocol"
 )
 
 var httpClient = &http.Client{Timeout: 3 * time.Second}

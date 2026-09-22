@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jjp-monitor/jjp/internal/atomicfile"
+	"github.com/stickleetoto/NodeScope/internal/atomicfile"
 )
 
 const maxStateBytes int64 = 64 << 20

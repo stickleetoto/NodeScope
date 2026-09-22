@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jjp-monitor/jjp/internal/history"
-	"github.com/jjp-monitor/jjp/internal/insight"
-	"github.com/jjp-monitor/jjp/internal/protocol"
-	"github.com/jjp-monitor/jjp/internal/store"
+	"github.com/stickleetoto/NodeScope/internal/history"
+	"github.com/stickleetoto/NodeScope/internal/insight"
+	"github.com/stickleetoto/NodeScope/internal/protocol"
+	"github.com/stickleetoto/NodeScope/internal/store"
 )
 
 type Server struct {

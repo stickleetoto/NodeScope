@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jjp-monitor/jjp/internal/protocol"
+	"github.com/stickleetoto/NodeScope/internal/protocol"
 )
 
 func collectLegacy() (protocol.Metrics, error) {

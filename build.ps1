@@ -15,7 +15,7 @@ $targets = @(
 foreach ($t in $targets) {
     $env:GOOS = $t.OS
     $env:GOARCH = $t.Arch
-    go build -trimpath -ldflags "-s -w" -o $t.Out ./cmd/jjp
+    go build -trimpath -ldflags "-s -w" -o $t.Out ./cmd/nodescope
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 

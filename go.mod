@@ -1,3 +1,3 @@
-module github.com/jjp-monitor/jjp
+module github.com/stickleetoto/NodeScope
 
 go 1.23

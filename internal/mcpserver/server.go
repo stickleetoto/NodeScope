@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jjp-monitor/jjp/internal/apiclient"
-	"github.com/jjp-monitor/jjp/internal/history"
-	"github.com/jjp-monitor/jjp/internal/protocol"
+	"github.com/stickleetoto/NodeScope/internal/apiclient"
+	"github.com/stickleetoto/NodeScope/internal/history"
+	"github.com/stickleetoto/NodeScope/internal/protocol"
 )
 
 const modernProtocol = "2026-07-28"

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jjp-monitor/jjp/internal/history"
-	"github.com/jjp-monitor/jjp/internal/protocol"
+	"github.com/stickleetoto/NodeScope/internal/history"
+	"github.com/stickleetoto/NodeScope/internal/protocol"
 )
 
 type Client struct {

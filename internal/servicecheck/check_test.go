@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/jjp-monitor/jjp/internal/protocol"
+	"github.com/stickleetoto/NodeScope/internal/protocol"
 )
 
 func TestTCPCheck(t *testing.T) {

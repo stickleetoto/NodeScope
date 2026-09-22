@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jjp-monitor/jjp/internal/atomicfile"
-	"github.com/jjp-monitor/jjp/internal/protocol"
+	"github.com/stickleetoto/NodeScope/internal/atomicfile"
+	"github.com/stickleetoto/NodeScope/internal/protocol"
 )
 
 const (

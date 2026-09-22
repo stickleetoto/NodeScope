@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jjp-monitor/jjp/internal/protocol"
-	"github.com/jjp-monitor/jjp/internal/store"
+	"github.com/stickleetoto/NodeScope/internal/protocol"
+	"github.com/stickleetoto/NodeScope/internal/store"
 )
 
 func joinedNode(t *testing.T, ts *httptest.Server, name string) protocol.JoinResponse {

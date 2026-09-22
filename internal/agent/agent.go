@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jjp-monitor/jjp/internal/agentwal"
-	"github.com/jjp-monitor/jjp/internal/metrics"
-	"github.com/jjp-monitor/jjp/internal/protocol"
-	"github.com/jjp-monitor/jjp/internal/servicecheck"
+	"github.com/stickleetoto/NodeScope/internal/agentwal"
+	"github.com/stickleetoto/NodeScope/internal/metrics"
+	"github.com/stickleetoto/NodeScope/internal/protocol"
+	"github.com/stickleetoto/NodeScope/internal/servicecheck"
 )
 
 var HTTPClient = &http.Client{Timeout: 8 * time.Second}

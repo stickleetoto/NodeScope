@@ -20,15 +20,15 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/jjp-monitor/jjp/internal/agent"
-	"github.com/jjp-monitor/jjp/internal/apiclient"
-	"github.com/jjp-monitor/jjp/internal/autostart"
-	"github.com/jjp-monitor/jjp/internal/filelock"
-	"github.com/jjp-monitor/jjp/internal/history"
-	"github.com/jjp-monitor/jjp/internal/mcpserver"
-	"github.com/jjp-monitor/jjp/internal/protocol"
-	"github.com/jjp-monitor/jjp/internal/server"
-	"github.com/jjp-monitor/jjp/internal/store"
+	"github.com/stickleetoto/NodeScope/internal/agent"
+	"github.com/stickleetoto/NodeScope/internal/apiclient"
+	"github.com/stickleetoto/NodeScope/internal/autostart"
+	"github.com/stickleetoto/NodeScope/internal/filelock"
+	"github.com/stickleetoto/NodeScope/internal/history"
+	"github.com/stickleetoto/NodeScope/internal/mcpserver"
+	"github.com/stickleetoto/NodeScope/internal/protocol"
+	"github.com/stickleetoto/NodeScope/internal/server"
+	"github.com/stickleetoto/NodeScope/internal/store"
 )
 
 type exitCodeError struct {

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jjp-monitor/jjp/internal/protocol"
-	jjpserver "github.com/jjp-monitor/jjp/internal/server"
-	"github.com/jjp-monitor/jjp/internal/store"
+	"github.com/stickleetoto/NodeScope/internal/protocol"
+	jjpserver "github.com/stickleetoto/NodeScope/internal/server"
+	"github.com/stickleetoto/NodeScope/internal/store"
 )
 
 func TestHealthExitCodes(t *testing.T) {
