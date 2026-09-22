@@ -24,6 +24,7 @@ import (
 type Server struct {
 	Store   *store.Store
 	History *history.Store
+	runtime *runtimeStats
 }
 
 func RandomToken(n int) (string, error) {
@@ -35,6 +36,9 @@ func RandomToken(n int) (string, error) {
 }
 
 func (s *Server) Handler() http.Handler {
+	if s.runtime == nil {
+		s.runtime = newRuntimeStats()
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]string{"status": "ok", "version": protocol.Version})
@@ -47,6 +51,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/metrics/history", s.metricHistory)
 	mux.HandleFunc("GET /api/v1/metrics/history/stats", s.metricHistoryStats)
 	mux.HandleFunc("GET /api/v1/metrics/rollup", s.metricRollup)
+	mux.HandleFunc("GET /api/v1/system/health", s.systemHealth)
 	mux.HandleFunc("GET /api/v1/summary", s.summary)
 	mux.HandleFunc("GET /api/v1/overview", s.overview)
 	mux.HandleFunc("GET /api/v1/unhealthy", s.unhealthy)
@@ -60,7 +65,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/nodes/{id}/diagnosis", s.diagnosis)
 	mux.HandleFunc("PATCH /api/v1/nodes/{id}", s.renameNode)
 	mux.HandleFunc("DELETE /api/v1/nodes/{id}", s.deleteNode)
-	return withAPIHeaders(withLimits(mux))
+	return withRuntimeStats(s.runtime, withAPIHeaders(withLimits(mux)))
 }
 
 func withLimits(next http.Handler) http.Handler {
@@ -173,6 +178,7 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, 500, "storage_failure", "storage failure")
 		return
 	}
+	s.runtime.heartbeats.Add(1)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -205,7 +211,17 @@ func (s *Server) telemetry(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "history_storage_failure", "failed to persist telemetry")
 		return
 	}
+	s.runtime.telemetryBatches.Add(1)
+	s.runtime.telemetrySamples.Add(uint64(ack.AcceptedSamples))
 	writeJSON(w, http.StatusOK, ack)
+}
+
+func (s *Server) systemHealth(w http.ResponseWriter, r *http.Request) {
+	if !s.readOK(r) {
+		writeAPIError(w, http.StatusUnauthorized, "unauthorized", "read or admin token required")
+		return
+	}
+	writeJSON(w, http.StatusOK, s.systemHealthSnapshot())
 }
 
 func (s *Server) metricHistory(w http.ResponseWriter, r *http.Request) {
