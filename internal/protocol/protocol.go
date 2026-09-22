@@ -84,8 +84,10 @@ type Node struct {
 	Secret        string          `json:"secret"`
 	RegisteredAt  time.Time       `json:"registered_at"`
 	LastHeartbeat time.Time       `json:"last_heartbeat"`
-	Metrics       Metrics         `json:"metrics"`
-	Services      []ServiceStatus `json:"services,omitempty"`
+	Metrics       Metrics           `json:"metrics"`
+	Services      []ServiceStatus   `json:"services,omitempty"`
+	Labels        map[string]string `json:"labels,omitempty"`
+	Groups        []string          `json:"groups,omitempty"`
 }
 
 type NodeView struct {
@@ -97,8 +99,10 @@ type NodeView struct {
 	RegisteredAt  time.Time       `json:"registered_at"`
 	LastHeartbeat time.Time       `json:"last_heartbeat"`
 	Status        string          `json:"status"`
-	Metrics       Metrics         `json:"metrics"`
-	Services      []ServiceStatus `json:"services,omitempty"`
+	Metrics       Metrics           `json:"metrics"`
+	Services      []ServiceStatus   `json:"services,omitempty"`
+	Labels        map[string]string `json:"labels,omitempty"`
+	Groups        []string          `json:"groups,omitempty"`
 }
 
 type Alert struct {
@@ -152,6 +156,12 @@ type IncidentDetail struct {
 
 type RenameNodeRequest struct {
 	Name string `json:"name"`
+}
+
+
+type NodeMetadataRequest struct {
+	Labels map[string]string `json:"labels,omitempty"`
+	Groups []string          `json:"groups,omitempty"`
 }
 
 type APIInfo struct {
